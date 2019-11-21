@@ -6,3 +6,4 @@ RUN npm ci
 RUN npm run build
 
 EXPOSE 80
+ENTRYPOINT [ "node", "out/server.js" ]

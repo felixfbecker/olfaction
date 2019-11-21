@@ -1,0 +1,172 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+# Mutation
+
+type Mutation {
+  addCodeSmells(repository: String!, commit: String!, codeSmells: [CodeSmellInput!]!): [CodeSmell!]!
+  deleteCodeSmell(id: ID!): ID
+}
+
+input CodeSmellInput {
+  # A client-provided globally unique ID (UUID)
+  # This is used to declare predecessors.
+  # If a code smell with this ID already exists, the code smell will be updated.
+  id: ID!
+
+  # Optional ID of a code smell in a previous commit,
+  # to define the life span of this code smell through commits.
+  # This will set up the successor for the referenced code smell as well.
+  predecessor: ID
+
+  # Optional ID of a code smell in a previous commit,
+  # to define the life span of this code smell through commits.
+  # This will set up the predecessor for the referenced code smell as well.
+  successor: ID
+
+  # An arbitrary string that uniquely identifies the kind of code smell, e.g. "GodClass"
+  kind: String!
+
+  # A message for the code smell, which can be specific to this particular instance.
+  message: String
+
+  # Locations of the code smell in the code.
+  locations: [LocationInput!]
+}
+
+input LocationInput {
+  # The file path of the location
+  file: String!
+
+  range: RangeInput!
+}
+
+input RangeInput {
+  start: PositionInput!
+  end: PositionInput!
+}
+
+input PositionInput {
+  line: Int!
+  character: Int!
+}
+
+# Query
+
+type Query {
+  repositories: [Repository!]!
+  repository(name: String!): Repository
+  codeSmell(id: ID!): CodeSmell
+}
+
+type Repository {
+  name: String!
+  commit(sha: String!): Commit!
+  codeSmellLifespans: [CodeSmellLifespan!]!
+}
+
+type Signature {
+  name: String!
+  email: String!
+  date: String!
+}
+
+type Commit {
+  sha: String!
+  parents: [Commit!]!
+  message: String!
+  subject: String!
+  author: Signature!
+  committer: Signature!
+  files: [File!]!
+  repository: Repository!
+  codeSmells: [CodeSmell!]!
+}
+
+type File {
+  path: String!
+
+  """
+  The file content from the git repository.
+  null if the repository was not uploaded.
+  """
+  content(
+    """
+    Encoding to use.
+    If not given, will try to auto-detect, otherwise default to UTF8.
+    """
+    encoding: String
+  ): String
+
+  referencedFiles: [File!]!
+  referencedByFiles: [File!]!
+  codeSmells: [CodeSmell!]!
+  linesCount: Int!
+  commit: Commit!
+}
+
+# One code smell that lived through multiple commits.
+type CodeSmellLifespan {
+  kind: String!
+  instances: [CodeSmell!]!
+  """
+  The duration this code smell was present in the codebase as an ISO8601 duration string
+  """
+  duration: String!
+  """
+  The interval this code smell was present in the codebase as an ISO8601 interval string with start/end
+  """
+  interval: String!
+}
+
+type CodeSmell {
+  id: ID!
+  message: String
+
+  locations: [Location!]!
+
+  # The complete life span of this code smell.
+  lifeSpan: CodeSmellLifespan!
+
+  # This code smell in a previous commit.
+  #
+  # This may not be in the direct parent commit because not every commit
+  # must be analyzed, but it is guaranteed to be in an ascendant commit.
+  predecessor: CodeSmell
+
+  # This code smell in a later commit.
+  #
+  # This may not be in a direct child commit because not every commit must be
+  # analyzed, but it is guaranteed to be in a descendant commit.
+  successor: CodeSmell
+
+  # The commit this code smell was detected in.
+  commit: Commit!
+}
+
+type Location {
+  file: File!
+  range: Range!
+  """
+  The content of the range
+  """
+  content(
+    """
+    Encoding to use.
+    If not given, will try to auto-detect, otherwise default to UTF8.
+    """
+    encoding: String
+  ): String!
+}
+
+type Range {
+  start: Position!
+  end: Position!
+}
+
+type Position {
+  line: Int!
+  character: Int!
+}

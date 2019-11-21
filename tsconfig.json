@@ -5,7 +5,11 @@
     "sourceMap": true,
     "moduleResolution": "node",
     "target": "es2020",
+    "module": "commonjs",
     "esModuleInterop": true,
-    "outDir": "out"
-  }
+    "skipLibCheck": true,
+    "outDir": "out",
+    "typeRoots": ["src/types", "node_modules/@types"]
+  },
+  "include": ["src/**/*"]
 }
