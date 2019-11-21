@@ -1,9 +1,9 @@
 import { Client } from 'pg'
 import DataLoader from 'dataloader'
 import sql from 'sql-template-strings'
-import { listFiles, Commit, getCommits, File, getFileContent } from './git'
+import { listFiles, Commit, getCommits, getFileContent } from './git'
 import { groupBy } from 'lodash'
-import { CodeSmell, UUID, SHA, RepoSpec, CommitSpec, FileSpec, Location } from './models'
+import { CodeSmell, UUID, SHA, RepoSpec, CommitSpec, FileSpec, Location, File } from './models'
 import { NullFields } from './util'
 import assert from 'assert'
 

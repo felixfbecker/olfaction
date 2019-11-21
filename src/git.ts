@@ -2,7 +2,7 @@ import * as path from 'path'
 import exec from 'execa'
 import * as fs from 'mz/fs'
 import { AbortError } from './abort'
-import { RepoSpec, CommitSpec, SHA, FileSpec, RepoRootSpec, CodeSmell } from './models'
+import { RepoSpec, CommitSpec, SHA, FileSpec, RepoRootSpec, CodeSmell, File } from './models'
 import { UnknownRepositoryError, UnknownCommitError } from './errors'
 import { take, filter } from 'ix/asynciterable/pipe/index'
 import execa from 'execa'
@@ -61,10 +61,6 @@ export async function getFileContent({
         cwd: path.join(repoRoot, repository),
     })
     return stdout
-}
-
-export interface File {
-    path: string
 }
 
 export interface Signature {

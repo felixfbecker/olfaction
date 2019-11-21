@@ -26,6 +26,10 @@ export interface CodeSmell {
     repository: string
 }
 
+export interface File {
+    path: string
+}
+
 export interface RepoSpec {
     repository: string
 }
