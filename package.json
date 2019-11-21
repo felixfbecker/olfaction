@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . -w",
-    "start": "node out/server.js"
+    "start": "node out/server.js",
+    "prettier": "prettier --write '**/*.{ts,json,yml,graphql,md}'",
+    "gen-idl": "get-graphql-schema http://localhost:4040/graphql | prettier --parser graphql > schema/schema.graphql"
   },
   "devDependencies": {
     "@sourcegraph/eslint-config": "^0.3.0",
@@ -21,6 +23,7 @@
     "@types/node": "^12.7.8",
     "@types/pg": "^7.11.1",
     "eslint": "^6.4.0",
+    "get-graphql-schema": "^2.1.2",
     "prettier": "^1.18.2",
     "typescript": "^3.6.3"
   },

@@ -13,6 +13,7 @@
       "program": "${workspaceFolder}/out/server.js",
       "outFiles": ["${workspaceFolder}/out/**/*.js"],
       "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
       "env": {
         "FORCE_COLOR": "3",
         "PGDATABASE": "olfaction"
