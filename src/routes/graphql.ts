@@ -259,12 +259,19 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             fields: {
                 codeSmell: {
                     type: CodeSmellType,
+                    args: {
+                        id: {
+                            type: GraphQLNonNull(GraphQLID),
+                            description: 'The ID of the code smell to query.',
+                        },
+                    },
                 },
                 repository: {
                     type: RepositoryType,
                     args: {
                         name: {
                             type: GraphQLNonNull(GraphQLString),
+                            description: 'The name under which the repository was uploaded.',
                         },
                     },
                 },
