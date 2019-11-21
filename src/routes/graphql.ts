@@ -10,7 +10,7 @@ import { transaction } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 
-const schemaIDL = readFileSync(__dirname + '/../schema/schema.graphql', 'utf-8')
+const schemaIDL = readFileSync(__dirname + '/../../schema/schema.graphql', 'utf-8')
 const schema = buildSchema(schemaIDL)
 
 interface Context {

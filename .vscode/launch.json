@@ -10,7 +10,7 @@
       "name": "Launch Program",
       "cwd": "${workspaceFolder}",
       "runtimeExecutable": "/Users/felix/.local/share/powershell/Modules/nvm/2.4.0/vs/v13.1.0/bin/node",
-      "program": "${workspaceFolder}/out/rest.js",
+      "program": "${workspaceFolder}/out/server.js",
       "outFiles": ["${workspaceFolder}/out/**/*.js"],
       "console": "integratedTerminal",
       "env": {
