@@ -5,7 +5,7 @@ import * as pg from 'pg'
 import { listRepositories, validateRepository, validateCommit } from '../git'
 import sql from 'sql-template-strings'
 import { Loaders, createLoaders } from '../loaders'
-import { Location, CodeSmell, UUID, RepoSpec, CommitSpec, FileSpec } from '../models'
+import { Location, CodeSmell, UUID, RepoSpec, CommitSpec, FileSpec, Range } from '../models'
 import { transaction } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
@@ -110,7 +110,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     class CodeSmellLifeSpanResolver {
         constructor(private firstCodeSmell: Pick<CodeSmell, 'id' | 'kind'>) {}
 
-        get kind() {
+        get kind(): string {
             return this.firstCodeSmell.kind
         }
 
@@ -172,10 +172,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
     class LocationResolver {
         constructor(private spec: Location & RepoSpec & CommitSpec) {}
-        file() {
+        file(): FileResolver {
             return new FileResolver(this.spec)
         }
-        range() {
+        range(): Range {
             return this.spec.range
         }
         async content({ encoding }: { encoding: string }, { loaders }: Context): Promise<string> {
@@ -216,7 +216,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     }
 
     class FileResolver {
-        public get path() {
+        public get path(): string {
             return this.spec.file
         }
 
@@ -275,7 +275,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 codeSmells: CodeSmellInput[]
             },
             { loaders }: Context
-        ) {
+        ): Promise<CodeSmellResolver[]> {
             await validateRepository({ repository, repoRoot })
             await validateCommit({ repository, commit, repoRoot })
 
