@@ -141,7 +141,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         { cacheKeyFn: args => repoAtCommitCacheKeyFn(args) + connectionArgsKeyFn(args) }
     )
 
-    const codeSmellStarterInRepositoryLoader = new DataLoader<string, CodeSmell[] | null>(
+    const codeSmellStartersInRepositoryLoader = new DataLoader<string, CodeSmell[] | null>(
         async repositories => {
             const result = await db.query<{
                 codeSmells: [null] | CodeSmell[]
@@ -224,14 +224,13 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     from code_smells
                     where id = any(${codeSmellIds}::uuid[])
                     union all
-                    select c.id, c.kind, c.predecessor, c."message", c."commit", c.repository, c.locations, s.input
+                    select c.id, c.kind, c.predecessor, c."message", c."commit", c.repository, c.locations, p.input
                     from code_smells c
                     join predecessors p on p.predecessor = c.id
                 )
                 select id, kind, predecessor, "message", "commit", repository, locations
                 from unnest(${codeSmellIds}::uuid[]) with ordinality as input
                 left join predecessors on input.input = predecessors.input and predecessors.predecessor is null
-                group by input.ordinality
                 order by input.ordinality
             `)
             assert.strictEqual(result.rows.length, codeSmellIds.length)
@@ -239,7 +238,6 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 if (!row.id) {
                     return null
                 }
-                assert.strictEqual(row.id, codeSmellIds[i])
                 codeSmellByIdLoader.prime(row.id, row)
                 return row
             })
@@ -298,7 +296,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
     return {
         codeSmell: codeSmellByIdLoader,
         codeSmellSuccessor: codeSmellSuccessorLoader,
-        codeSmellStartersInRepository: codeSmellStarterInRepositoryLoader,
+        codeSmellStartersInRepository: codeSmellStartersInRepositoryLoader,
         codeSmellLifespan: codeSmellLifespanLoader,
         codeSmellStarter: codeSmellStarterLoader,
         codeSmellsByCommit: codeSmellsByCommitLoader,
