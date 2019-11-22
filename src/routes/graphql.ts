@@ -21,6 +21,13 @@ import { Location, CodeSmell, UUID, RepoSpec, CommitSpec, FileSpec, Range, File 
 import { transaction } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
+import {
+    connectionDefinitions,
+    forwardConnectionArgs,
+    Connection,
+    Edge,
+    ConnectionArguments,
+} from 'graphql-relay'
 
 const schemaIDL = readFileSync(__dirname + '/../../schema/schema.graphql', 'utf-8')
 const schema = buildSchema(schemaIDL)
@@ -62,7 +69,8 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 // },
             },
             codeSmells: {
-                type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellType))),
+                type: GraphQLNonNull(CodeSmellConnectionType),
+                args: forwardConnectionArgs,
             },
         }),
     })
@@ -156,6 +164,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             id: {
                 type: GraphQLNonNull(GraphQLID),
             },
+            message: {
+                type: GraphQLString,
+                description: 'A message for this specific code smell instance.',
+            },
             locations: {
                 type: GraphQLList(GraphQLNonNull(LocationType)),
             },
@@ -179,6 +191,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             },
         }),
     })
+    var { connectionType: CodeSmellConnectionType } = connectionDefinitions({ nodeType: CodeSmellType })
 
     var CodeSmellLifeSpanType = new GraphQLObjectType({
         name: 'CodeSmellLifeSpan',
@@ -208,6 +221,11 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             name: { type: GraphQLString },
             commit: {
                 type: CommitType,
+                args: {
+                    sha: {
+                        type: GraphQLNonNull(GraphQLString),
+                    },
+                },
                 // resolve: (source: RepoSpec, { sha }: { sha: string }, { loaders }: Context) => {
                 //     return loaders.commit.load({ ...source, commit: sha })
                 // },
@@ -406,21 +424,28 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
     const createCommitResolver = async (spec: RepoSpec & CommitSpec, { loaders }: Context) => {
         const commit = await loaders.commit.load(spec)
-        return (
-            commit && {
-                ...commit,
-                repository: () => new RepositoryResolver(commit.repository),
-                subject: (): string => commit.message.split('\n', 1)[0],
-                async codeSmells({}, { loaders }: Context): Promise<CodeSmellResolver[]> {
-                    const codeSmells = await loaders.codeSmellsByCommit.load(spec)
-                    return codeSmells.map(codeSmell => new CodeSmellResolver(codeSmell))
-                },
-                async files({}, { loaders }: Context): Promise<FileResolver[]> {
-                    const files = await loaders.files.load(spec)
-                    return files.map(file => new FileResolver({ ...spec, file: file.path }))
-                },
-            }
-        )
+        if (!commit) {
+            return null
+        }
+        return {
+            ...commit,
+            repository: () => new RepositoryResolver(commit.repository),
+            subject: (): string => commit.message.split('\n', 1)[0],
+            async codeSmells(
+                args: ConnectionArguments,
+                { loaders }: Context
+            ): Promise<Connection<CodeSmellResolver>> {
+                const { edges, pageInfo } = await loaders.codeSmellsByCommit.load({ ...spec, ...args })
+                return {
+                    pageInfo,
+                    edges: edges.map(({ node, cursor }) => ({ node: new CodeSmellResolver(node), cursor })),
+                }
+            },
+            async files({}, { loaders }: Context): Promise<FileResolver[]> {
+                const files = await loaders.files.load(spec)
+                return files.map(file => new FileResolver({ ...spec, file: file.path }))
+            },
+        }
     }
 
     class FileResolver {

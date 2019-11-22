@@ -2,10 +2,12 @@ import { Client } from 'pg'
 import DataLoader from 'dataloader'
 import sql from 'sql-template-strings'
 import { listFiles, Commit, getCommits, getFileContent } from './git'
-import { groupBy } from 'lodash'
+import { groupBy, last } from 'lodash'
 import { CodeSmell, UUID, SHA, RepoSpec, CommitSpec, FileSpec, Location, File } from './models'
-import { NullFields } from './util'
+import { NullFields, base64encode, parseCursor, isNullArray } from './util'
 import assert from 'assert'
+import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
+import { IterableX } from 'ix/iterable'
 
 export interface Loaders {
     /** Loads a code smell by ID. */
@@ -22,7 +24,7 @@ export interface Loaders {
     /** Loads the first occurence of any given code smell */
     codeSmellStarter: DataLoader<UUID, CodeSmell | null>
 
-    codeSmellsByCommit: DataLoader<RepoSpec & CommitSpec, CodeSmell[]>
+    codeSmellsByCommit: DataLoader<RepoSpec & CommitSpec & ConnectionArguments, Connection<CodeSmell>>
 
     files: DataLoader<RepoSpec & CommitSpec, File[]>
     fileContent: DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>
@@ -30,9 +32,39 @@ export interface Loaders {
     commit: DataLoader<RepoSpec & CommitSpec, Commit | null>
 }
 
-const isNullArray = (arr: [null] | unknown[]): arr is [null] => arr.length === 1 && arr[0] === null
-
 const repoAtCommitCacheKeyFn = ({ repository, commit }: RepoSpec & CommitSpec) => `${repository}@${commit}`
+const connectionArgsKeyFn = ({ first, after }: ConnectionArguments) => `*${after}+${first}`
+
+/**
+ * Creates a connection from a DB result page that was fetched with one more
+ * item before and after than requested (if possible), which will be stripped
+ * and used to determine pagination info.
+ *
+ * @param result The result array from the DB with one more item at the
+ * beginning and end.
+ * @param args The pagination options that were given.
+ * @param cursorKey The key that was used to order the result and is used to determine the cursor.
+ */
+const connectionFromOverfetchedResult = <T extends object>(
+    result: T[],
+    { first, after }: ConnectionArguments,
+    cursorKey: keyof T
+): Connection<T> => {
+    const edges: Edge<T>[] = IterableX.from(result)
+        .skip(after ? 1 : 0)
+        .take(first ?? Infinity)
+        .map(node => ({ node, cursor: base64encode(cursorKey + ':' + node[cursorKey]) }))
+        .toArray()
+    return {
+        edges,
+        pageInfo: {
+            startCursor: edges[0]?.cursor,
+            endCursor: last(edges)?.cursor,
+            hasPreviousPage: Boolean(after), // The presence of an "after" cursor MUST mean there is at least one item BEFORE this page
+            hasNextPage: last(result) !== last(edges)?.node,
+        },
+    }
+}
 
 export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }): Loaders => {
     const codeSmellByIdLoader = new DataLoader<UUID, CodeSmell | null>(async ids => {
@@ -59,28 +91,54 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         })
     })
 
-    const codeSmellsByCommitLoader = new DataLoader<RepoSpec & CommitSpec, CodeSmell[]>(
+    const codeSmellsByCommitLoader = new DataLoader<
+        RepoSpec & CommitSpec & ConnectionArguments,
+        Connection<CodeSmell>
+    >(
         async specs => {
+            const input = JSON.stringify(
+                specs.map(({ repository, commit, first, after }, ordinality) => {
+                    assert(!first || first >= 0, 'Parameter first must be positive')
+                    const cursor = (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
+                    return { ordinality, repository, commit, first, afterId: cursor && cursor.value }
+                })
+            )
             const result = await db.query<{
                 codeSmells: [null] | CodeSmell[]
             }>(sql`
-            select array_agg(row_to_json(code_smells)) as "codeSmells"
-            from json_to_recordset(${specs}) with ordinality as input
-            left join code_smells on input.repository = code_smells.repository and input.commit = code_smells."commit"
-            group by input_sha.ordinality
-            order by input_sha.ordinality
-        `)
-            return result.rows.map(row => {
-                if (isNullArray(row.codeSmells)) {
-                    return []
+                select input.ordinality, array_agg(row_to_json(c)) as "codeSmells"
+                from jsonb_to_recordset(${input}::jsonb)
+                as input("ordinality" int, "commit" text, "repository" text, "first" int, "after" uuid)
+                join lateral (
+                    select code_smells.*
+                    from code_smells
+                    -- required filters:
+                    where input.repository = code_smells.repository and input.commit = code_smells.commit
+                    -- pagination:
+                    and (input.after is null or code_smells.id >= input.after) -- include one before to know whether there is a previous page
+                    order by id asc
+                    limit input.first + 1 -- query one more to know whether there is a next page
+                ) c on true
+                group by input.ordinality
+                order by input.ordinality
+            `)
+            assert.equal(result.rows.length, specs.length)
+            return result.rows.map(
+                ({ codeSmells }, i): Connection<CodeSmell> => {
+                    const spec = specs[i]
+                    if (isNullArray(codeSmells)) {
+                        codeSmells = []
+                    }
+                    for (const codeSmell of codeSmells) {
+                        assert.equal(codeSmell.repository, spec.repository)
+                        assert.equal(codeSmell.commit, spec.commit)
+                        codeSmellByIdLoader.prime(codeSmell.id, codeSmell)
+                    }
+                    return connectionFromOverfetchedResult(codeSmells, spec, 'id')
                 }
-                for (const codeSmell of row.codeSmells) {
-                    codeSmellByIdLoader.prime(codeSmell.id, codeSmell)
-                }
-                return row.codeSmells
-            })
+            )
         },
-        { cacheKeyFn: repoAtCommitCacheKeyFn }
+        { cacheKeyFn: args => repoAtCommitCacheKeyFn(args) + connectionArgsKeyFn(args) }
     )
 
     const codeSmellStarterInRepositoryLoader = new DataLoader<string, CodeSmell[] | null>(
