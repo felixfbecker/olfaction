@@ -1,7 +1,7 @@
 import { Client } from 'pg'
 import sql from 'sql-template-strings'
 
-export function groupBy<K, V>(items: Iterable<V>, by: (value: V) => K): Map<K, V> {
+export function keyBy<K, V>(items: Iterable<V>, by: (value: V) => K): Map<K, V> {
     const map = new Map<K, V>()
     for (const item of items) {
         map.set(by(item), item)
