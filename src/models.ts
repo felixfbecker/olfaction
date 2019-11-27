@@ -16,14 +16,19 @@ export interface Location {
     range: Range
 }
 
-export interface CodeSmell {
+export interface CodeSmellLifespan {
     id: UUID
     kind: string
-    message: string
-    predecessor: UUID | null
-    locations: Location[]
-    commit: SHA
     repository: string
+}
+
+export interface CodeSmell {
+    id: UUID
+    message: string
+    locations: Location[]
+    lifespan: UUID
+    lifespanIndex: number
+    commit: SHA
 }
 
 export interface File {

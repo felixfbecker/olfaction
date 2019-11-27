@@ -1,5 +1,10 @@
 type CodeSmell {
   id: ID!
+
+  """
+  A message for this specific code smell instance.
+  """
+  message: String
   locations: [Location!]
 
   """
@@ -27,12 +32,42 @@ type CodeSmell {
   commit: Commit
 }
 
+"""
+A connection to a list of items.
+"""
+type CodeSmellConnection {
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+
+  """
+  A list of edges.
+  """
+  edges: [CodeSmellEdge]
+}
+
+"""
+An edge in a connection.
+"""
+type CodeSmellEdge {
+  """
+  The item at the end of the edge
+  """
+  node: CodeSmell
+
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
+}
+
 input CodeSmellInput {
   """
-  A client-provided globally unique ID (UUID). This is used to declare
-  predecessors. If a code smell with this ID already exists, the code smell will be updated.
+  A client-provided ID to associate code smell instances in multiple commits as part of the same code smell lifespan
   """
-  id: ID!
+  lifespan: ID!
+  lifespanIndex: Int!
 
   """
   An arbitrary string that uniquely identifies the kind of code smell, e.g. "GodClass". Must be the same for every instance.
@@ -43,20 +78,6 @@ input CodeSmellInput {
   A message for the code smell, which can be specific to this particular instance.
   """
   message: String
-
-  """
-  Optional ID of a code smell in a previous commit, to define the life span of
-  this code smell through the commit history.This will set up the successor for
-  the referenced code smell as well.
-  """
-  predecessor: String
-
-  """
-  Optional ID of a code smell in a previous commit, to define the life span of
-  this code smell through commits. This will set up the predecessor for the
-  referenced code smell as well.
-  """
-  successor: String
 
   """
   Locations of the code smell in the code.
@@ -97,7 +118,7 @@ type Commit {
   The files that existed at this commit in the repository
   """
   files: [File!]!
-  codeSmells: [CodeSmell!]!
+  codeSmells(after: String, first: Int): CodeSmellConnection!
 }
 
 type File {
@@ -143,6 +164,31 @@ type Mutation {
   addCodeSmells(repository: String!, commit: String!, codeSmells: [CodeSmellInput]!): [CodeSmell!]!
 }
 
+"""
+Information about pagination in a connection.
+"""
+type PageInfo {
+  """
+  When paginating forwards, are there more items?
+  """
+  hasNextPage: Boolean!
+
+  """
+  When paginating backwards, are there more items?
+  """
+  hasPreviousPage: Boolean!
+
+  """
+  When paginating backwards, the cursor to continue.
+  """
+  startCursor: String
+
+  """
+  When paginating forwards, the cursor to continue.
+  """
+  endCursor: String
+}
+
 type Position {
   """
   The 0-based line number of the position
@@ -168,8 +214,18 @@ input PositionInput {
 }
 
 type Query {
-  codeSmell: CodeSmell
-  repository(name: String!): Repository
+  codeSmell(
+    """
+    The ID of the code smell to query.
+    """
+    id: ID!
+  ): CodeSmell
+  repository(
+    """
+    The name under which the repository was uploaded.
+    """
+    name: String!
+  ): Repository
   repositories: [Repository]!
 }
 
@@ -199,7 +255,7 @@ input RangeInput {
 
 type Repository {
   name: String
-  commit: Commit
+  commit(sha: String!): Commit
   codeSmellLifespans: [CodeSmellLifeSpan!]!
 }
 

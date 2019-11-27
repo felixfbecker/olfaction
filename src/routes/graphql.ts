@@ -17,8 +17,18 @@ import * as pg from 'pg'
 import { listRepositories, validateRepository, validateCommit, Signature, Commit } from '../git'
 import sql from 'sql-template-strings'
 import { Loaders, createLoaders } from '../loaders'
-import { Location, CodeSmell, UUID, RepoSpec, CommitSpec, FileSpec, Range, File } from '../models'
-import { transaction } from '../util'
+import {
+    Location,
+    CodeSmell,
+    UUID,
+    RepoSpec,
+    CommitSpec,
+    FileSpec,
+    Range,
+    File,
+    CodeSmellLifespan,
+} from '../models'
+import { transaction, keyBy } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 import {
@@ -28,9 +38,7 @@ import {
     Edge,
     ConnectionArguments,
 } from 'graphql-relay'
-
-const schemaIDL = readFileSync(__dirname + '/../../schema/schema.graphql', 'utf-8')
-const schema = buildSchema(schemaIDL)
+import { last } from 'lodash'
 
 interface Context {
     loaders: Loaders
@@ -236,13 +244,23 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         },
     })
 
+    interface CodeSmellInput {
+        lifespan: UUID
+        lifespanIndex: number
+        kind: string
+        message: string
+        locations: Location[]
+    }
     var CodeSmellInputType = new GraphQLInputObjectType({
         name: 'CodeSmellInput',
         fields: {
-            id: {
+            lifespan: {
                 type: GraphQLNonNull(GraphQLID),
                 description:
-                    'A client-provided globally unique ID (UUID). This is used to declare predecessors. If a code smell with this ID already exists, the code smell will be updated.',
+                    'A client-provided ID to associate code smell instances in multiple commits as part of the same code smell lifespan',
+            },
+            lifespanIndex: {
+                type: GraphQLNonNull(GraphQLInt),
             },
             kind: {
                 type: GraphQLNonNull(GraphQLString),
@@ -253,16 +271,6 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 type: GraphQLString,
                 description:
                     'A message for the code smell, which can be specific to this particular instance.',
-            },
-            predecessor: {
-                type: GraphQLString,
-                description:
-                    'Optional ID of a code smell in a previous commit, to define the life span of this code smell through the commit history.This will set up the successor for the referenced code smell as well.',
-            },
-            successor: {
-                type: GraphQLString,
-                description:
-                    'Optional ID of a code smell in a previous commit, to define the life span of this code smell through commits. This will set up the predecessor for the referenced code smell as well.',
             },
             locations: {
                 type: GraphQLList(GraphQLNonNull(LocationInputType)),
@@ -327,35 +335,40 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async codeSmellLifespans({}, { loaders }: Context): Promise<CodeSmellLifeSpanResolver[]> {
-            // Get the start of lifespans
-            const starters = await loaders.codeSmellStartersInRepository.load(this.name)
-            return starters!.map(starter => new CodeSmellLifeSpanResolver(starter))
+            const lifespans = await loaders.codeSmellLifespans.load(this.name)
+            return lifespans!.map(lifespan => new CodeSmellLifeSpanResolver(lifespan))
         }
     }
 
     class CodeSmellLifeSpanResolver {
-        constructor(private firstCodeSmell: Pick<CodeSmell, 'id' | 'kind'>) {}
+        constructor(private lifespan: CodeSmellLifespan) {}
 
         get kind(): string {
-            return this.firstCodeSmell.kind
+            return this.lifespan.kind
         }
 
         async duration({}, { loaders }: Context): Promise<string> {
-            const instances = (await loaders.codeSmellLifespan.load(this.firstCodeSmell.id))!
-            const start = (await loaders.commit.load(instances[0]))!.committer.date
-            const end = (await loaders.commit.load(instances[instances.length - 1]))!.committer.date
+            const { repository } = this.lifespan
+            const instances = (await loaders.codeSmellLifespanInstances.load(this.lifespan.id))!
+            const start = (await loaders.commit.load({ repository, commit: instances[0].commit }))!.committer
+                .date
+            const end = (await loaders.commit.load({ repository, commit: last(instances)!.commit }))!
+                .committer.date
             return Duration.between(ZonedDateTime.parse(start), ZonedDateTime.parse(end)).toString()
         }
 
         async interval({}, { loaders }: Context): Promise<string> {
-            const instances = (await loaders.codeSmellLifespan.load(this.firstCodeSmell.id))!
-            const start = (await loaders.commit.load(instances[0]))!.committer.date
-            const end = (await loaders.commit.load(instances[instances.length - 1]))!.committer.date
+            const { repository } = this.lifespan
+            const instances = (await loaders.codeSmellLifespanInstances.load(this.lifespan.id))!
+            const start = (await loaders.commit.load({ repository, commit: instances[0].commit }))!.committer
+                .date
+            const end = (await loaders.commit.load({ repository, commit: last(instances)!.commit }))!
+                .committer.date
             return `${start}/${end}`
         }
 
         async instances({}, { loaders }: Context): Promise<CodeSmellResolver[]> {
-            const instances = await loaders.codeSmellLifespan.load(this.firstCodeSmell.id)
+            const instances = await loaders.codeSmellLifespanInstances.load(this.lifespan.id)
             return instances!.map(codeSmell => new CodeSmellResolver(codeSmell))
         }
     }
@@ -369,29 +382,34 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return this.codeSmell.message
         }
         async lifeSpan({}, { loaders }: Context) {
-            const starter = (await loaders.codeSmellStarter.load(this.codeSmell.id))!
-            return new CodeSmellLifeSpanResolver(starter)
+            const lifespan = (await loaders.codeSmellLifespan.load(this.codeSmell.id))!
+            return new CodeSmellLifeSpanResolver(lifespan)
         }
         async predecessor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            if (!this.codeSmell.predecessor) {
-                return null
-            }
-            const codeSmell = await loaders.codeSmell.load(this.codeSmell.predecessor)
+            const codeSmell = await loaders.codeSmellByLifespanIndex.load({
+                lifespan: this.codeSmell.lifespan,
+                lifespanIndex: this.codeSmell.lifespanIndex - 1,
+            })
             return codeSmell && new CodeSmellResolver(codeSmell)
         }
 
         async successor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmellSuccessor.load(this.codeSmell.id)
+            const codeSmell = await loaders.codeSmellByLifespanIndex.load({
+                lifespan: this.codeSmell.lifespan,
+                lifespanIndex: this.codeSmell.lifespanIndex + 1,
+            })
             return codeSmell && new CodeSmellResolver(codeSmell)
         }
 
-        commit({}, context: Context) {
-            return createCommitResolver(this.codeSmell, context)
+        async commit({}, { loaders }: Context) {
+            const { repository } = (await loaders.codeSmellLifespan.load(this.codeSmell.id))!
+            return createCommitResolver({ repository, commit: this.codeSmell.commit }, { loaders })
         }
 
-        locations() {
+        async locations({}, { loaders }: Context) {
+            const { repository } = (await loaders.codeSmellLifespan.load(this.codeSmell.id))!
             return this.codeSmell.locations.map(
-                location => new LocationResolver({ ...location, ...this.codeSmell })
+                location => new LocationResolver({ ...location, ...this.codeSmell, repository })
             )
         }
     }
@@ -487,15 +505,6 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         },
     }
 
-    interface CodeSmellInput {
-        id: string
-        predecessor: string | null
-        successor: string | null
-        kind: string
-        message: string
-        locations: Location[]
-    }
-
     const mutation = {
         async addCodeSmells(
             {
@@ -514,17 +523,20 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
             return await transaction(db, async () => {
                 return await Promise.all(
-                    codeSmells.map(async ({ id, kind, message, predecessor, successor, locations }) => {
+                    codeSmells.map(async ({ kind, message, locations, lifespan, lifespanIndex }) => {
                         const locationsJson = JSON.stringify(locations)
                         const result = await db.query<CodeSmell>(sql`
+                            with lifespan as (
+                                insert into code_smell_lifespans (id, kind, repository)
+                                values (${lifespan}, ${kind}, ${repository})
+                                on conflict on constraint code_smell_lifespans_pkey do nothing
+                                returning id
+                            )
                             insert into code_smells
-                                        (id, repository, "commit", kind, "message", predecessor, locations)
-                            values      (${id}, ${repository}, ${commit}, ${kind}, ${message}, ${predecessor}, ${locationsJson}::jsonb)
-                            returning   id, repository, "commit", kind, "message", predecessor, locations
+                                        ("commit", "message", locations, lifespan, lifespan_index)
+                            values      (${repository}, ${commit}, ${kind}, ${message}, ${locationsJson}::jsonb, lifespan.id, ${lifespanIndex})
+                            returning   id, "commit", "message", locations, lifespan, lifespan_index
                         `)
-                        await db.query(
-                            sql`update code_smells set predecessor = ${id} where id = ${successor}`
-                        )
                         const codeSmell = result.rows[0]
                         loaders.codeSmell.prime(codeSmell.id, codeSmell)
                         return new CodeSmellResolver(codeSmell)
