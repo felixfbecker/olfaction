@@ -1,10 +1,24 @@
-import { UUID, RepoSpec, CommitSpec } from './models'
+import { RepoSpec, CommitSpec, CodeSmellLifespanSpec, CodeSmellSpec, CodeSmell } from './models'
 import * as HttpStatus from 'http-status-codes'
 
-export class CodeSmellNotFoundError extends Error {
-    public readonly name = 'CodeSmellNotFoundError'
-    constructor(public id: UUID) {
-        super(`Could not find code smell with id ${id}`)
+export class UnknownCodeSmellLifespanError extends Error {
+    public readonly name = 'UnknownCodeSmellLifespanError'
+    constructor({ lifespan }: CodeSmellLifespanSpec) {
+        super(`Could not find code smell lifespan with id ${lifespan}`)
+    }
+}
+
+export class UnknownCodeSmellError extends Error {
+    public readonly name: 'UnknownCodeSmellError'
+    constructor(spec: CodeSmellSpec | (CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>)) {
+        if ('codeSmell' in spec) {
+            super(`Could not find code smell with id ${spec.codeSmell}`)
+        } else {
+            super(
+                `Could not find code smell with lifespan ID ${spec.lifespan} and index ${spec.lifespanIndex}`
+            )
+        }
+        this.name = 'UnknownCodeSmellError'
     }
 }
 

@@ -13,37 +13,36 @@ import {
     CodeSmellLifespan,
     CodeSmellLifespanSpec,
     Commit,
+    CodeSmellSpec,
 } from './models'
 import { NullFields, base64encode, parseCursor, isNullArray } from './util'
 import assert from 'assert'
 import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
+import { UnknownCodeSmellError, UnknownCommitError, UnknownCodeSmellLifespanError } from './errors'
 
 export type ForwardConnectionArguments = Pick<ConnectionArguments, 'first' | 'after'>
 
 export interface Loaders {
     codeSmell: {
         /** Loads a code smell by ID. */
-        byId: DataLoader<CodeSmell['id'], CodeSmell | null>
-        byLifespanIndex: DataLoader<
-            CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>,
-            CodeSmell | null
-        >
+        byId: DataLoader<CodeSmell['id'], CodeSmell>
+        byLifespanIndex: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>, CodeSmell>
         /** Loads the entire life span of a given lifespan ID. */
         forLifespan: DataLoader<CodeSmellLifespanSpec & ForwardConnectionArguments, Connection<CodeSmell>>
         forCommit: DataLoader<RepoSpec & CommitSpec & ForwardConnectionArguments, Connection<CodeSmell>>
     }
     codeSmellLifespan: {
         /** Loads a code smell lifespan by ID. */
-        byId: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan | null>
+        byId: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>
         /** Loads the code smell lifespans in a given repository. */
         forRepository: DataLoader<RepoSpec & ForwardConnectionArguments, Connection<CodeSmellLifespan>>
         /** Loads the lifespan of any given code smell */
-        forCodeSmell: DataLoader<CodeSmell['id'], CodeSmellLifespan | null>
+        forCodeSmell: DataLoader<CodeSmell['id'], CodeSmellLifespan>
     }
 
     commit: {
-        bySha: DataLoader<RepoSpec & CommitSpec, Commit | null>
+        bySha: DataLoader<RepoSpec & CommitSpec, Commit>
 
         /** Loads the existing commit SHAs in a repository */
         forRepository: DataLoader<RepoSpec & ForwardConnectionArguments, Connection<Commit>>
@@ -89,26 +88,24 @@ const connectionFromOverfetchedResult = <T extends object>(
 export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }) => {
     var loaders: Loaders = {
         codeSmell: {
-            byId: new DataLoader<UUID, CodeSmell | null>(async ids => {
+            byId: new DataLoader(async ids => {
                 const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
                     select code_smells.*, code_smells.lifespan_index as "lifespanIndex"
                     from unnest(${ids}::uuid[]) with ordinality as input_id
                     left join code_smells on input_id = code_smells.id
                     order by input_id.ordinality
                 `)
-                return result.rows.map(row => {
+                return result.rows.map((row, i) => {
+                    const spec: CodeSmellSpec = { codeSmell: ids[i] }
                     if (!row.id) {
-                        return null
+                        throw new UnknownCodeSmellError(spec)
                     }
                     loaders.codeSmell.byLifespanIndex.prime(row, row)
                     return row
                 })
             }),
 
-            byLifespanIndex: new DataLoader<
-                { lifespan: CodeSmellLifespan['id']; lifespanIndex: number },
-                CodeSmell | null
-            >(
+            byLifespanIndex: new DataLoader(
                 async specs => {
                     const input = JSON.stringify(
                         specs.map(({ lifespan, lifespanIndex }, ordinality) => ({
@@ -125,8 +122,9 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         order by input_id.ordinality
                     `)
                     return result.rows.map((row, i) => {
+                        const spec = specs[i]
                         if (!row.id) {
-                            return null
+                            throw new UnknownCodeSmellError(spec)
                         }
                         loaders.codeSmell.byId.prime(row.id, row)
                         return row
@@ -240,20 +238,23 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         },
 
         codeSmellLifespan: {
-            byId: new DataLoader<UUID, CodeSmellLifespan | null>(async ids => {
+            byId: new DataLoader(async ids => {
                 const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
                     select *
                     from unnest(${ids}::uuid[]) with ordinality as input_id
                     left join code_smells_lifespans on input_id = code_smell_lifespans.id
                     order by input_id.ordinality
                 `)
-                return result.rows.map(row => (row.id ? row : null))
+                return result.rows.map((row, i) => {
+                    const spec: CodeSmellLifespanSpec = { lifespan: ids[i] }
+                    if (!row.id) {
+                        throw new UnknownCodeSmellLifespanError(spec)
+                    }
+                    return row
+                })
             }),
 
-            forRepository: new DataLoader<
-                RepoSpec & ForwardConnectionArguments,
-                Connection<CodeSmellLifespan>
-            >(
+            forRepository: new DataLoader(
                 async specs => {
                     const input = JSON.stringify(
                         specs.map(({ repository, first, after }, ordinality) => {
@@ -294,7 +295,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 { cacheKeyFn: args => args.repository + connectionArgsKeyFn(args) }
             ),
 
-            forCodeSmell: new DataLoader<CodeSmell['id'], CodeSmellLifespan | null>(async codeSmellIds => {
+            forCodeSmell: new DataLoader(async codeSmellIds => {
                 const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
                     select code_smell_lifespans.*
                     from unnest(${codeSmellIds}::uuid[]) with ordinality as input
@@ -305,9 +306,10 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     order by input.ordinality
                 `)
                 assert.strictEqual(result.rows.length, codeSmellIds.length)
-                return result.rows.map(row => {
+                return result.rows.map((row, i) => {
+                    const spec: CodeSmellSpec = { codeSmell: codeSmellIds[i] }
                     if (!row.id) {
-                        return null
+                        throw new UnknownCodeSmellError(spec)
                     }
                     loaders.codeSmellLifespan.byId.prime(row.id, row)
                     return row
@@ -339,7 +341,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         ),
 
         commit: {
-            bySha: new DataLoader<RepoSpec & CommitSpec, Commit | null>(
+            bySha: new DataLoader(
                 async commitSpecs => {
                     const byRepo = groupBy(commitSpecs, commit => commit.repository)
                     const commits = new Map(
@@ -357,9 +359,13 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             )
                         )
                     )
-                    return commitSpecs.map(
-                        ({ repository, commit }) => commits.get(repository)?.get(commit) || null
-                    )
+                    return commitSpecs.map(spec => {
+                        const commit = commits.get(spec.repository)?.get(spec.commit)
+                        if (!commit) {
+                            throw new UnknownCommitError(spec)
+                        }
+                        return commit
+                    })
                 },
                 { cacheKeyFn: repoAtCommitCacheKeyFn }
             ),

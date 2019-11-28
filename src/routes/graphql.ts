@@ -363,7 +363,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
         async commit({ sha }: { sha: string }, { loaders }: Context) {
             const commit = await loaders.commit.bySha.load({ repository: this.name, commit: sha })
-            return commit && createCommitResolver({ repository: this.name }, commit)
+            return createCommitResolver({ repository: this.name }, commit)
         }
 
         async codeSmellLifespans(
@@ -451,7 +451,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 lifespan: this.codeSmell.lifespan,
                 lifespanIndex: this.codeSmell.lifespanIndex - 1,
             })
-            return codeSmell && new CodeSmellResolver(codeSmell)
+            return new CodeSmellResolver(codeSmell)
         }
 
         async successor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
@@ -459,7 +459,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 lifespan: this.codeSmell.lifespan,
                 lifespanIndex: this.codeSmell.lifespanIndex + 1,
             })
-            return codeSmell && new CodeSmellResolver(codeSmell)
+            return new CodeSmellResolver(codeSmell)
         }
 
         async commit({}, { loaders }: Context): Promise<CommitResolver> {
@@ -548,7 +548,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
         async commit({}, { loaders }: Context) {
             const commit = await loaders.commit.bySha.load(this.spec)
-            return commit && createCommitResolver(this.spec, commit)
+            return createCommitResolver(this.spec, commit)
         }
 
         async linesCount({}, { loaders }: Context) {
@@ -572,7 +572,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         },
         async codeSmell({ id }: { id: UUID }, { loaders }: Context) {
             const codeSmell = await loaders.codeSmell.byId.load(id)
-            return codeSmell && new CodeSmellResolver(codeSmell)
+            return new CodeSmellResolver(codeSmell)
         },
     }
 
