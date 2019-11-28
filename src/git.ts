@@ -2,12 +2,15 @@ import * as path from 'path'
 import exec from 'execa'
 import * as fs from 'mz/fs'
 import { AbortError } from './abort'
-import { RepoSpec, CommitSpec, SHA, FileSpec, RepoRootSpec, CodeSmell, File } from './models'
+import { RepoSpec, CommitSpec, SHA, FileSpec, RepoRootSpec, CodeSmell, File, Commit } from './models'
 import { UnknownRepositoryError, UnknownCommitError } from './errors'
 import { take, filter } from 'ix/asynciterable/pipe/index'
 import execa from 'execa'
 import { sortBy } from 'lodash'
 import { fromNodeStream } from 'ix'
+import { AsyncIterableX } from 'ix/asynciterable'
+import { keyBy } from './util'
+import { IterableX } from 'ix/iterable'
 
 export async function filterValidCommits({
     repository,
@@ -63,21 +66,6 @@ export async function getFileContent({
     return stdout
 }
 
-export interface Signature {
-    name: string
-    email: string
-    /** Strict ISO date string (including timezone) */
-    date: string
-}
-
-export interface Commit {
-    repository: string
-    sha: SHA
-    author: Signature
-    committer: Signature
-    message: string
-}
-
 enum FormatTokens {
     commitSha = '%H',
     newLine = '%n',
@@ -100,6 +88,36 @@ const commitFormat: string = [
     FormatTokens.bodyRaw,
 ].join(FormatTokens.newLine)
 
+/**
+ * Parse a git output chunk formatted according to `commitFormat`.
+ */
+const parseCommit = (chunk: string): Commit => {
+    const [
+        sha,
+        authorName,
+        authorEmail,
+        authorDate,
+        committerName,
+        committerEmail,
+        committerDate,
+        ...messageLines
+    ] = chunk.split('\n')
+    return {
+        sha,
+        author: {
+            name: authorName,
+            email: authorEmail,
+            date: authorDate,
+        },
+        committer: {
+            name: committerName,
+            email: committerEmail,
+            date: committerDate,
+        },
+        message: messageLines.join('\n'),
+    }
+}
+
 export async function getCommits({
     repoRoot,
     repository,
@@ -107,7 +125,7 @@ export async function getCommits({
 }: {
     repoRoot: string
     repository: string
-    commitShas: string[]
+    commitShas: SHA[]
 }): Promise<ReadonlyMap<SHA, Commit>> {
     // Bulk-validate the commits first, because git show fails hard on bad revisions
     const filteredCommitShas = await filterValidCommits({ repoRoot, repository, commitShas })
@@ -126,35 +144,8 @@ export async function getCommits({
             ],
             { cwd: path.join(repoRoot, repository) }
         )
-        const commitChunks = stdout.split('\0')
-        const commitsBySha = new Map<SHA, Commit>()
-        for (const commitChunk of commitChunks) {
-            const [
-                sha,
-                authorName,
-                authorEmail,
-                authorDate,
-                committerName,
-                committerEmail,
-                committerDate,
-                ...messageLines
-            ] = commitChunk.split('\n')
-            commitsBySha.set(sha, {
-                repository,
-                sha,
-                author: {
-                    name: authorName,
-                    email: authorEmail,
-                    date: authorDate,
-                },
-                committer: {
-                    name: committerName,
-                    email: committerEmail,
-                    date: committerDate,
-                },
-                message: messageLines.join('\n'),
-            })
-        }
+        const commits = IterableX.from(stdout.split('\0')).map(parseCommit)
+        const commitsBySha = keyBy(commits, c => c.sha)
         return commitsBySha
     } catch (err) {
         if (err.code === 'ENOENT') {
@@ -222,7 +213,7 @@ export async function listFiles({
         if (err.killed) {
             throw new AbortError()
         }
-        if (err.exitCode === 128 && err.stderr && err.stderr.includes('fatal: not a tree object')) {
+        if (err.exitCode === 128 && err.stderr?.includes('fatal: not a tree object')) {
             throw new UnknownCommitError({ repository, commit })
         }
         throw err
@@ -240,8 +231,31 @@ export async function validateRepository({ repository, repoRoot }: { repository:
     }
 }
 
-export async function listRepositories({ repoRoot }: { repoRoot: string }): Promise<string[]> {
+export async function listRepositories({ repoRoot }: RepoRootSpec): Promise<string[]> {
     return await fs.readdir(repoRoot)
+}
+
+export const log = ({
+    repoRoot,
+    repository,
+    commit = 'HEAD',
+}: RepoRootSpec & RepoSpec & Partial<CommitSpec>): AsyncIterableX<Commit> => {
+    const gitProcess = exec('git', ['log', '-z', `--format=${commitFormat}`, commit, '--'], {
+        cwd: path.join(repoRoot, repository),
+    })
+    return AsyncIterableX.from(gitProcess.stdout!)
+        .catchWith<Buffer>(err => {
+            if (err.code === 'ENOENT') {
+                throw new UnknownRepositoryError({ repository })
+            }
+            if (err.exitCode === 128 && err.stderr?.startsWith('fatal: bad object')) {
+                throw new UnknownCommitError({ repository, commit })
+            }
+            throw err
+        })
+        .pipe(split('\0'))
+        .map(parseCommit)
+        .finally(() => gitProcess.kill())
 }
 
 export async function init({

@@ -1,24 +1,25 @@
 import { Client } from 'pg'
 import DataLoader from 'dataloader'
 import sql from 'sql-template-strings'
-import { listFiles, Commit, getCommits, getFileContent } from './git'
+import * as git from './git'
 import { groupBy, last } from 'lodash'
 import {
     CodeSmell,
     UUID,
-    SHA,
     RepoSpec,
     CommitSpec,
     FileSpec,
-    Location,
     File,
     CodeSmellLifespan,
     CodeSmellLifespanSpec,
+    Commit,
 } from './models'
 import { NullFields, base64encode, parseCursor, isNullArray } from './util'
 import assert from 'assert'
 import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
+
+export type ForwardConnectionArguments = Pick<ConnectionArguments, 'first' | 'after'>
 
 export interface Loaders {
     /** Loads a code smell by ID. */
@@ -47,6 +48,9 @@ export interface Loaders {
     fileContent: DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>
 
     commit: DataLoader<RepoSpec & CommitSpec, Commit | null>
+
+    /** Loads the existing commit SHAs in a repository */
+    commits: DataLoader<RepoSpec & ConnectionArguments, Connection<Commit>>
 }
 
 const repoAtCommitCacheKeyFn = ({ repository, commit }: RepoSpec & CommitSpec) => `${repository}@${commit}`
@@ -294,7 +298,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         files: new DataLoader<RepoSpec & CommitSpec, File[]>(
             async commits => {
                 return await Promise.all(
-                    commits.map(({ repository, commit }) => listFiles({ repository, commit, repoRoot }))
+                    commits.map(({ repository, commit }) => git.listFiles({ repository, commit, repoRoot }))
                 )
             },
             { cacheKeyFn: repoAtCommitCacheKeyFn }
@@ -304,7 +308,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             async specs => {
                 return await Promise.all(
                     specs.map(({ repository, commit, file }) =>
-                        getFileContent({ repository, commit, repoRoot, file })
+                        git.getFileContent({ repository, commit, repoRoot, file })
                     )
                 )
             },
@@ -323,7 +327,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             async ([repository, commits]) =>
                                 [
                                     repository,
-                                    await getCommits({
+                                    await git.getCommits({
                                         repoRoot,
                                         repository,
                                         commitShas: commits.map(c => c.commit),
@@ -332,13 +336,32 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         )
                     )
                 )
-                return commitSpecs.map(({ repository, commit }) => {
-                    const forRepo = commits.get(repository)
-                    return (forRepo && forRepo.get(commit)) || null
-                })
+                return commitSpecs.map(
+                    ({ repository, commit }) => commits.get(repository)?.get(commit) || null
+                )
             },
             { cacheKeyFn: repoAtCommitCacheKeyFn }
         ),
+
+        commits: new DataLoader<RepoSpec & ConnectionArguments, Connection<Commit>>(async specs => {
+            return Promise.all(
+                specs.map(async ({ repository, first, after }) => {
+                    try {
+                        const cursor = (after && parseCursor<Commit>(after, new Set(['sha']))) || undefined
+                        const commits = await git
+                            .log({ repository, commit: cursor?.value, repoRoot })
+                            .tap((commit: Commit) =>
+                                loaders.commit.prime({ repository, commit: commit.sha }, commit)
+                            )
+                            .take(typeof first === 'number' ? first + 1 : Infinity)
+                            .toArray()
+                        return connectionFromOverfetchedResult<Commit>(commits, { first, after }, 'sha')
+                    } catch (err) {
+                        return err
+                    }
+                })
+            )
+        }),
     }
 
     return loaders

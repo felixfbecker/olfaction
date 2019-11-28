@@ -151,6 +151,36 @@ type Commit {
   codeSmells(after: String, first: Int): CodeSmellConnection!
 }
 
+"""
+A connection to a list of items.
+"""
+type CommitConnection {
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+
+  """
+  A list of edges.
+  """
+  edges: [CommitEdge]
+}
+
+"""
+An edge in a connection.
+"""
+type CommitEdge {
+  """
+  The item at the end of the edge
+  """
+  node: Commit
+
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
+}
+
 type File {
   path: String!
 
@@ -315,6 +345,7 @@ input RangeInput {
 
 type Repository {
   name: String
+  commits(after: String, first: Int): CommitConnection!
   commit(sha: String!): Commit
   codeSmellLifespans(after: String, first: Int): CodeSmellLifeSpanConnection!
 }

@@ -22,6 +22,20 @@ export interface CodeSmellLifespan {
     repository: string
 }
 
+export interface Signature {
+    name: string
+    email: string
+    /** Strict ISO date string (including timezone) */
+    date: string
+}
+
+export interface Commit {
+    sha: SHA
+    author: Signature
+    committer: Signature
+    message: string
+}
+
 export interface CodeSmell {
     id: UUID
     message: string

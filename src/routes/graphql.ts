@@ -12,7 +12,7 @@ import {
 } from 'graphql'
 import graphQLHTTPServer from 'express-graphql'
 import * as pg from 'pg'
-import { listRepositories, validateRepository, validateCommit, Signature, Commit } from '../git'
+import { listRepositories, validateRepository, validateCommit } from '../git'
 import sql from 'sql-template-strings'
 import { Loaders, createLoaders } from '../loaders'
 import {
@@ -25,6 +25,8 @@ import {
     Range,
     File,
     CodeSmellLifespan,
+    Commit,
+    Signature,
 } from '../models'
 import { transaction } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
@@ -78,6 +80,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             },
         }),
     })
+    var { connectionType: CommitConnectionType } = connectionDefinitions({ nodeType: CommitType })
 
     var FileType = new GraphQLObjectType<File>({
         name: 'File',
@@ -229,6 +232,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         name: 'Repository',
         fields: {
             name: { type: GraphQLString },
+            commits: {
+                args: forwardConnectionArgs,
+                type: GraphQLNonNull(CommitConnectionType),
+            },
             commit: {
                 type: CommitType,
                 args: {
@@ -337,8 +344,20 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     class RepositoryResolver {
         constructor(public name: string) {}
 
-        commit({ sha }: { sha: string }, context: Context) {
-            return createCommitResolver({ commit: sha, repository: this.name }, context)
+        async commits(args: ConnectionArguments, { loaders }: Context): Promise<Connection<CommitResolver>> {
+            const { edges, pageInfo } = await loaders.commits.load({ ...args, repository: this.name })
+            return {
+                pageInfo,
+                edges: edges.map(({ cursor, node }) => ({
+                    cursor,
+                    node: createCommitResolver({ repository: this.name }, node),
+                })),
+            }
+        }
+
+        async commit({ sha }: { sha: string }, { loaders }: Context) {
+            const commit = await loaders.commit.load({ repository: this.name, commit: sha })
+            return commit && createCommitResolver({ repository: this.name }, commit)
         }
 
         async codeSmellLifespans(
@@ -433,9 +452,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return codeSmell && new CodeSmellResolver(codeSmell)
         }
 
-        async commit({}, { loaders }: Context) {
+        async commit({}, { loaders }: Context): Promise<CommitResolver> {
             const { repository } = (await loaders.codeSmellLifespan.load(this.codeSmell.id))!
-            return createCommitResolver({ repository, commit: this.codeSmell.commit }, { loaders })
+            const commit = await loaders.commit.load({ repository, commit: this.codeSmell.commit })
+            return createCommitResolver({ repository }, commit!)
         }
 
         async locations({}, { loaders }: Context) {
@@ -472,14 +492,11 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
     }
 
-    const createCommitResolver = async (spec: RepoSpec & CommitSpec, { loaders }: Context) => {
-        const commit = await loaders.commit.load(spec)
-        if (!commit) {
-            return null
-        }
+    const createCommitResolver = ({ repository }: RepoSpec, commit: Commit) => {
+        const spec = { repository, commit: commit.sha }
         return {
             ...commit,
-            repository: () => new RepositoryResolver(commit.repository),
+            repository: () => new RepositoryResolver(repository),
             subject: (): string => commit.message.split('\n', 1)[0],
             async codeSmells(
                 args: ConnectionArguments,
@@ -492,7 +509,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 }
             },
             async files(args: ConnectionArguments, { loaders }: Context): Promise<Connection<FileResolver>> {
-                const files = await loaders.files.load(spec)
+                const files = await loaders.files.load({ repository, commit: commit.sha })
 
                 return connectionFromArray(
                     files.map(file => new FileResolver({ ...spec, file: file.path })),
@@ -501,6 +518,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             },
         }
     }
+    type CommitResolver = ReturnType<typeof createCommitResolver>
 
     class FileResolver {
         constructor(private spec: FileSpec & RepoSpec & CommitSpec) {}
@@ -515,8 +533,9 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return decoder.decode(content)
         }
 
-        commit({}, context: Context) {
-            return createCommitResolver(this.spec, context)
+        async commit({}, { loaders }: Context) {
+            const commit = await loaders.commit.load(this.spec)
+            return commit && createCommitResolver(this.spec, commit)
         }
 
         async linesCount({}, { loaders }: Context) {
