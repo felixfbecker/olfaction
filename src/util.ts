@@ -65,3 +65,13 @@ export const mapConnectionNodes = <T, R>(connection: Connection<T>, fn: (node: T
     ...connection,
     edges: connection.edges.map(edge => ({ ...edge, node: fn(edge.node) })),
 })
+
+export function asError(value: unknown): Error {
+    if (value instanceof Error) {
+        return value
+    }
+    if (typeof value === 'string') {
+        return new Error(value)
+    }
+    return new Error()
+}

@@ -5,7 +5,6 @@ import * as git from './git'
 import { groupBy, last } from 'lodash'
 import {
     CodeSmell,
-    UUID,
     RepoSpec,
     CommitSpec,
     FileSpec,
@@ -15,7 +14,7 @@ import {
     Commit,
     CodeSmellSpec,
 } from './models'
-import { NullFields, base64encode, parseCursor, isNullArray } from './util'
+import { NullFields, base64encode, parseCursor, isNullArray, asError } from './util'
 import assert from 'assert'
 import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
@@ -88,7 +87,7 @@ const connectionFromOverfetchedResult = <T extends object>(
 export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }) => {
     var loaders: Loaders = {
         codeSmell: {
-            byId: new DataLoader(async ids => {
+            byId: new DataLoader<CodeSmell['id'], CodeSmell>(async ids => {
                 const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
                     select code_smells.*, code_smells.lifespan_index as "lifespanIndex"
                     from unnest(${ids}::uuid[]) with ordinality as input_id
@@ -98,14 +97,17 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 return result.rows.map((row, i) => {
                     const spec: CodeSmellSpec = { codeSmell: ids[i] }
                     if (!row.id) {
-                        throw new UnknownCodeSmellError(spec)
+                        return new UnknownCodeSmellError(spec)
                     }
                     loaders.codeSmell.byLifespanIndex.prime(row, row)
                     return row
                 })
             }),
 
-            byLifespanIndex: new DataLoader(
+            byLifespanIndex: new DataLoader<
+                CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>,
+                CodeSmell
+            >(
                 async specs => {
                     const input = JSON.stringify(
                         specs.map(({ lifespan, lifespanIndex }, ordinality) => ({
@@ -124,7 +126,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     return result.rows.map((row, i) => {
                         const spec = specs[i]
                         if (!row.id) {
-                            throw new UnknownCodeSmellError(spec)
+                            return new UnknownCodeSmellError(spec)
                         }
                         loaders.codeSmell.byId.prime(row.id, row)
                         return row
@@ -238,7 +240,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         },
 
         codeSmellLifespan: {
-            byId: new DataLoader(async ids => {
+            byId: new DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>(async ids => {
                 const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
                     select *
                     from unnest(${ids}::uuid[]) with ordinality as input_id
@@ -248,7 +250,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 return result.rows.map((row, i) => {
                     const spec: CodeSmellLifespanSpec = { lifespan: ids[i] }
                     if (!row.id) {
-                        throw new UnknownCodeSmellLifespanError(spec)
+                        return new UnknownCodeSmellLifespanError(spec)
                     }
                     return row
                 })
@@ -295,7 +297,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 { cacheKeyFn: args => args.repository + connectionArgsKeyFn(args) }
             ),
 
-            forCodeSmell: new DataLoader(async codeSmellIds => {
+            forCodeSmell: new DataLoader<CodeSmell['id'], CodeSmellLifespan>(async codeSmellIds => {
                 const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
                     select code_smell_lifespans.*
                     from unnest(${codeSmellIds}::uuid[]) with ordinality as input
@@ -309,7 +311,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 return result.rows.map((row, i) => {
                     const spec: CodeSmellSpec = { codeSmell: codeSmellIds[i] }
                     if (!row.id) {
-                        throw new UnknownCodeSmellError(spec)
+                        return new UnknownCodeSmellError(spec)
                     }
                     loaders.codeSmellLifespan.byId.prime(row.id, row)
                     return row
@@ -320,7 +322,9 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         files: new DataLoader<RepoSpec & CommitSpec, File[]>(
             async commits => {
                 return await Promise.all(
-                    commits.map(({ repository, commit }) => git.listFiles({ repository, commit, repoRoot }))
+                    commits.map(({ repository, commit }) =>
+                        git.listFiles({ repository, commit, repoRoot }).catch(err => asError(err))
+                    )
                 )
             },
             { cacheKeyFn: repoAtCommitCacheKeyFn }
@@ -330,7 +334,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             async specs => {
                 return await Promise.all(
                     specs.map(({ repository, commit, file }) =>
-                        git.getFileContent({ repository, commit, repoRoot, file })
+                        git.getFileContent({ repository, commit, repoRoot, file }).catch(err => asError(err))
                     )
                 )
             },
@@ -341,28 +345,34 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         ),
 
         commit: {
-            bySha: new DataLoader(
+            bySha: new DataLoader<RepoSpec & CommitSpec, Commit>(
                 async commitSpecs => {
                     const byRepo = groupBy(commitSpecs, commit => commit.repository)
-                    const commits = new Map(
+                    const commitsByRepo = new Map(
                         await Promise.all(
                             Object.entries(byRepo).map(
                                 async ([repository, commits]) =>
                                     [
                                         repository,
-                                        await git.getCommits({
-                                            repoRoot,
-                                            repository,
-                                            commitShas: commits.map(c => c.commit),
-                                        }),
+                                        await git
+                                            .getCommits({
+                                                repoRoot,
+                                                repository,
+                                                commitShas: commits.map(c => c.commit),
+                                            })
+                                            .catch(err => asError(err)),
                                     ] as const
                             )
                         )
                     )
                     return commitSpecs.map(spec => {
-                        const commit = commits.get(spec.repository)?.get(spec.commit)
+                        const repoCommits = commitsByRepo.get(spec.repository)
+                        if (repoCommits instanceof Error) {
+                            return repoCommits
+                        }
+                        const commit = repoCommits?.get(spec.commit)
                         if (!commit) {
-                            throw new UnknownCommitError(spec)
+                            return new UnknownCommitError(spec)
                         }
                         return commit
                     })
@@ -390,7 +400,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                                     'sha'
                                 )
                             } catch (err) {
-                                return err
+                                return asError(err)
                             }
                         })
                     )
