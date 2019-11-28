@@ -245,6 +245,9 @@ export const log = ({
     })
     return AsyncIterableX.from(gitProcess.stdout!)
         .catchWith<Buffer>(err => {
+            if (err.killed) {
+                throw new AbortError()
+            }
             if (err.code === 'ENOENT') {
                 throw new UnknownRepositoryError({ repository })
             }
