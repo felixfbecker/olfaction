@@ -25,7 +25,7 @@ export interface Loaders {
     codeSmell: DataLoader<CodeSmell['id'], CodeSmell | null>
 
     /** Loads a code smell lifespan by ID. */
-    codeSmellLifespanByID: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan | null>
+    codeSmellLifespanById: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan | null>
 
     codeSmellByLifespanIndex: DataLoader<
         CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>,
@@ -83,198 +83,195 @@ const connectionFromOverfetchedResult = <T extends object>(
 }
 
 export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }): Loaders => {
-    const codeSmellByIdLoader = new DataLoader<UUID, CodeSmell | null>(async ids => {
-        const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
-            select *
-            from unnest(${ids}::uuid[]) with ordinality as input_id
-            left join code_smells on input_id = code_smells.id
-            order by input_id.ordinality
-        `)
-        return result.rows.map(row => (row.id ? row : null))
-    })
-
-    const codeSmellLifespanByIdLoader = new DataLoader<UUID, CodeSmellLifespan | null>(async ids => {
-        const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
-            select *
-            from unnest(${ids}::uuid[]) with ordinality as input_id
-            left join code_smells_lifespans on input_id = code_smell_lifespans.id
-            order by input_id.ordinality
-        `)
-        return result.rows.map(row => (row.id ? row : null))
-    })
-
-    const codeSmellByLifespanIndexLoader = new DataLoader<
-        { lifespan: CodeSmellLifespan['id']; lifespanIndex: number },
-        CodeSmell | null
-    >(
-        async specs => {
-            const input = JSON.stringify(
-                specs.map(({ lifespan, lifespanIndex }, ordinality) => ({
-                    ordinality,
-                    lifespan,
-                    lifespanIndex,
-                }))
-            )
+    var loaders: Loaders = {
+        codeSmell: new DataLoader<UUID, CodeSmell | null>(async ids => {
             const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
-            select *
-            from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "lifespanIndex" int)
-            left join code_smells on code_smells.lifespan = input.lifespan
-            and code_smells.lifespan_index = input."lifespanIndex"
-            order by input_id.ordinality
-        `)
-            return result.rows.map((row, i) => {
-                const codeSmell = row.id ? row : null
-                codeSmellByIdLoader.prime(specs[i].lifespan, codeSmell)
-                return codeSmell
-            })
-        },
-        { cacheKeyFn: ({ lifespan, lifespanIndex }) => `${lifespan}#${lifespanIndex}` }
-    )
-
-    const codeSmellsByCommitLoader = new DataLoader<
-        RepoSpec & CommitSpec & ConnectionArguments,
-        Connection<CodeSmell>
-    >(
-        async specs => {
-            const input = JSON.stringify(
-                specs.map(({ repository, commit, first, after }, ordinality) => {
-                    assert(!first || first >= 0, 'Parameter first must be positive')
-                    const cursor = (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
-                    return { ordinality, repository, commit, first, after: cursor?.value }
-                })
-            )
-            const result = await db.query<{
-                codeSmells: [null] | (CodeSmell & { lifespan: CodeSmellLifespan })[]
-            }>(sql`
-                select input.ordinality, array_agg(row_to_json(c)) as "codeSmells"
-                from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "commit" text, "repository" text, "first" int, "after" uuid)
-                join lateral (
-                    select code_smells.*, row_to_json(code_smell_lifespans) as "lifespan"
-                    from code_smells
-                    inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
-                    -- required filters:
-                    where input.repository = code_smell_lifespans.repository and input.commit = code_smells.commit
-                    -- pagination:
-                    and (input.after is null or code_smells.id >= input.after) -- include one before to know whether there is a previous page
-                    order by id asc
-                    limit input.first + 1 -- query one more to know whether there is a next page
-                ) c on true
-                group by input.ordinality
-                order by input.ordinality
+                select *
+                from unnest(${ids}::uuid[]) with ordinality as input_id
+                left join code_smells on input_id = code_smells.id
+                order by input_id.ordinality
             `)
-            assert.equal(result.rows.length, specs.length, 'Expected length to be the same')
-            return result.rows.map(
-                ({ codeSmells }, i): Connection<CodeSmell> => {
+            return result.rows.map(row => (row.id ? row : null))
+        }),
+
+        codeSmellLifespanById: new DataLoader<UUID, CodeSmellLifespan | null>(async ids => {
+            const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
+                select *
+                from unnest(${ids}::uuid[]) with ordinality as input_id
+                left join code_smells_lifespans on input_id = code_smell_lifespans.id
+                order by input_id.ordinality
+            `)
+            return result.rows.map(row => (row.id ? row : null))
+        }),
+
+        codeSmellByLifespanIndex: new DataLoader<
+            { lifespan: CodeSmellLifespan['id']; lifespanIndex: number },
+            CodeSmell | null
+        >(
+            async specs => {
+                const input = JSON.stringify(
+                    specs.map(({ lifespan, lifespanIndex }, ordinality) => ({
+                        ordinality,
+                        lifespan,
+                        lifespanIndex,
+                    }))
+                )
+                const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
+                    select *
+                    from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "lifespanIndex" int)
+                    left join code_smells on code_smells.lifespan = input.lifespan
+                    and code_smells.lifespan_index = input."lifespanIndex"
+                    order by input_id.ordinality
+                `)
+                return result.rows.map((row, i) => {
+                    const codeSmell = row.id ? row : null
+                    loaders.codeSmell.prime(specs[i].lifespan, codeSmell)
+                    return codeSmell
+                })
+            },
+            { cacheKeyFn: ({ lifespan, lifespanIndex }) => `${lifespan}#${lifespanIndex}` }
+        ),
+
+        codeSmellsByCommit: new DataLoader<
+            RepoSpec & CommitSpec & ConnectionArguments,
+            Connection<CodeSmell>
+        >(
+            async specs => {
+                const input = JSON.stringify(
+                    specs.map(({ repository, commit, first, after }, ordinality) => {
+                        assert(!first || first >= 0, 'Parameter first must be positive')
+                        const cursor = (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
+                        return { ordinality, repository, commit, first, after: cursor?.value }
+                    })
+                )
+                const result = await db.query<{
+                    codeSmells: [null] | (CodeSmell & { lifespan: CodeSmellLifespan })[]
+                }>(sql`
+                    select input.ordinality, array_agg(row_to_json(c)) as "codeSmells"
+                    from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "commit" text, "repository" text, "first" int, "after" uuid)
+                    join lateral (
+                        select code_smells.*, row_to_json(code_smell_lifespans) as "lifespan"
+                        from code_smells
+                        inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
+                        -- required filters:
+                        where input.repository = code_smell_lifespans.repository and input.commit = code_smells.commit
+                        -- pagination:
+                        and (input.after is null or code_smells.id >= input.after) -- include one before to know whether there is a previous page
+                        order by id asc
+                        limit input.first + 1 -- query one more to know whether there is a next page
+                    ) c on true
+                    group by input.ordinality
+                    order by input.ordinality
+                `)
+                assert.equal(result.rows.length, specs.length, 'Expected length to be the same')
+                return result.rows.map(
+                    ({ codeSmells }, i): Connection<CodeSmell> => {
+                        const spec = specs[i]
+                        if (isNullArray(codeSmells)) {
+                            codeSmells = []
+                        }
+                        for (const codeSmell of codeSmells) {
+                            assert.equal(
+                                codeSmell.lifespan.repository,
+                                spec.repository,
+                                'Expected repository to equal input spec'
+                            )
+                            assert.equal(codeSmell.commit, spec.commit, 'Expected commit to equal input')
+                            loaders.codeSmell.prime(codeSmell.id, codeSmell)
+                            loaders.codeSmellLifespanById.prime(codeSmell.lifespan.id, codeSmell.lifespan)
+                        }
+                        return connectionFromOverfetchedResult(codeSmells, spec, 'id')
+                    }
+                )
+            },
+            { cacheKeyFn: args => repoAtCommitCacheKeyFn(args) + connectionArgsKeyFn(args) }
+        ),
+
+        codeSmellLifespans: new DataLoader<RepoSpec & ConnectionArguments, Connection<CodeSmellLifespan>>(
+            async specs => {
+                const input = JSON.stringify(
+                    specs.map(({ repository, first, after }, ordinality) => {
+                        assert(!first || first >= 0, 'Parameter first must be positive')
+                        const cursor =
+                            (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
+                        return { repository, ordinality, first, after: cursor?.value }
+                    })
+                )
+                const result = await db.query<{
+                    lifespans: [null] | CodeSmellLifespan[]
+                }>(sql`
+                    select array_agg(row_to_json(l)) as "lifespans"
+                    from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "first" int, "after" uuid)
+                    join lateral (
+                        select code_smell_lifespans.*
+                        from code_smell_lifespans
+                        where code_smell_lifespans.repository = input.repository
+                        -- pagination:
+                        and (input.after is null or code_smell_lifespans.id >= input.after) -- include one before to know whether there is a previous page
+                        order by id asc
+                        limit input.first + 1 -- query one more to know whether there is a next page
+                    ) l on true
+                    group by input.ordinality
+                    order by input.ordinality
+                `)
+                return result.rows.map(({ lifespans }, i) => {
                     const spec = specs[i]
-                    if (isNullArray(codeSmells)) {
-                        codeSmells = []
+                    if (isNullArray(lifespans)) {
+                        lifespans = []
                     }
-                    for (const codeSmell of codeSmells) {
-                        assert.equal(
-                            codeSmell.lifespan.repository,
-                            spec.repository,
-                            'Expected repository to equal input spec'
-                        )
-                        assert.equal(codeSmell.commit, spec.commit, 'Expected commit to equal input')
-                        codeSmellByIdLoader.prime(codeSmell.id, codeSmell)
-                        codeSmellLifespanByIdLoader.prime(codeSmell.lifespan.id, codeSmell.lifespan)
+                    for (const lifespan of lifespans) {
+                        loaders.codeSmellLifespanById.prime(lifespan.id, lifespan)
                     }
-                    return connectionFromOverfetchedResult(codeSmells, spec, 'id')
-                }
-            )
-        },
-        { cacheKeyFn: args => repoAtCommitCacheKeyFn(args) + connectionArgsKeyFn(args) }
-    )
-
-    const codeSmellLifespansInRepositoryLoader = new DataLoader<
-        RepoSpec & ConnectionArguments,
-        Connection<CodeSmellLifespan>
-    >(
-        async specs => {
-            const input = JSON.stringify(
-                specs.map(({ repository, first, after }, ordinality) => {
-                    assert(!first || first >= 0, 'Parameter first must be positive')
-                    const cursor =
-                        (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
-                    return { repository, ordinality, first, after: cursor?.value }
+                    return connectionFromOverfetchedResult(lifespans, spec, 'id')
                 })
-            )
-            const result = await db.query<{
-                lifespans: [null] | CodeSmellLifespan[]
-            }>(sql`
-            select array_agg(row_to_json(l)) as "lifespans"
-            from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "first" int, "after" uuid)
-            join lateral (
-                select code_smell_lifespans.*
-                from code_smell_lifespans
-                where code_smell_lifespans.repository = input.repository
-                -- pagination:
-                and (input.after is null or code_smell_lifespans.id >= input.after) -- include one before to know whether there is a previous page
-                order by id asc
-                limit input.first + 1 -- query one more to know whether there is a next page
-            ) l on true
-            group by input.ordinality
-            order by input.ordinality
-        `)
-            return result.rows.map(({ lifespans }, i) => {
-                const spec = specs[i]
-                if (isNullArray(lifespans)) {
-                    lifespans = []
-                }
-                for (const lifespan of lifespans) {
-                    codeSmellLifespanByIdLoader.prime(lifespan.id, lifespan)
-                }
-                return connectionFromOverfetchedResult(lifespans, spec, 'id')
-            })
-        },
-        { cacheKeyFn: args => args.repository + connectionArgsKeyFn(args) }
-    )
+            },
+            { cacheKeyFn: args => args.repository + connectionArgsKeyFn(args) }
+        ),
 
-    const codeSmellLifespanInstancesLoader = new DataLoader<
-        CodeSmellLifespanSpec & ConnectionArguments,
-        Connection<CodeSmell>
-    >(
-        async specs => {
-            const input = JSON.stringify(
-                specs.map(({ lifespan, first, after }, ordinality) => {
-                    assert(!first || first >= 0, 'Parameter first must be positive')
-                    const cursor =
-                        (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
-                    return { lifespan, ordinality, first, after: cursor?.value }
+        codeSmellLifespanInstances: new DataLoader<
+            CodeSmellLifespanSpec & ConnectionArguments,
+            Connection<CodeSmell>
+        >(
+            async specs => {
+                const input = JSON.stringify(
+                    specs.map(({ lifespan, first, after }, ordinality) => {
+                        assert(!first || first >= 0, 'Parameter first must be positive')
+                        const cursor =
+                            (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
+                        return { lifespan, ordinality, first, after: cursor?.value }
+                    })
+                )
+                const result = await db.query<{
+                    instances: CodeSmell[] | [null]
+                }>(sql`
+                    select array_agg(row_to_json(c) order by lifespan_index) as instances
+                    from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "first" int, "after" uuid)
+                    join lateral (
+                        select code_smells.*
+                        from code_smells
+                        where input.lifespan = code_smells.lifespan
+                        and (input.after is null or code_smells.id >= input.after)
+                        order by id
+                        limit input.first + 1
+                    ) c on true
+                    group by input.ordinality
+                    order by input.ordinality
+                `)
+                return result.rows.map(({ instances }, i) => {
+                    const spec = specs[i]
+                    if (isNullArray(instances)) {
+                        instances = []
+                    }
+                    for (const codeSmell of instances) {
+                        loaders.codeSmell.prime(codeSmell.id, codeSmell)
+                    }
+                    return connectionFromOverfetchedResult(instances, spec, 'id')
                 })
-            )
-            const result = await db.query<{
-                instances: CodeSmell[] | [null]
-            }>(sql`
-                select array_agg(row_to_json(c) order by lifespan_index) as instances
-                from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "first" int, "after" uuid)
-                join lateral (
-                    select code_smells.*
-                    from code_smells
-                    where input.lifespan = code_smells.lifespan
-                    and (input.after is null or code_smells.id >= input.after)
-                    order by id
-                    limit input.first + 1
-                ) c on true
-                group by input.ordinality
-                order by input.ordinality
-            `)
-            return result.rows.map(({ instances }, i) => {
-                const spec = specs[i]
-                if (isNullArray(instances)) {
-                    instances = []
-                }
-                for (const codeSmell of instances) {
-                    codeSmellByIdLoader.prime(codeSmell.id, codeSmell)
-                }
-                return connectionFromOverfetchedResult(instances, spec, 'id')
-            })
-        },
-        { cacheKeyFn: args => args.lifespan + connectionArgsKeyFn(args) }
-    )
+            },
+            { cacheKeyFn: args => args.lifespan + connectionArgsKeyFn(args) }
+        ),
 
-    const codeSmellLifespanLoader = new DataLoader<CodeSmell['id'], CodeSmellLifespan | null>(
-        async codeSmellIds => {
+        codeSmellLifespan: new DataLoader<CodeSmell['id'], CodeSmellLifespan | null>(async codeSmellIds => {
             const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
                 select code_smell_lifespans.*
                 from unnest(${codeSmellIds}::uuid[]) with ordinality as input
@@ -289,71 +286,60 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 if (!row.id) {
                     return null
                 }
-                codeSmellLifespanByIdLoader.prime(row.id, row)
+                loaders.codeSmellLifespanById.prime(row.id, row)
                 return row
             })
-        }
-    )
+        }),
 
-    const filesLoader = new DataLoader<RepoSpec & CommitSpec, File[]>(
-        async commits => {
-            return await Promise.all(
-                commits.map(({ repository, commit }) => listFiles({ repository, commit, repoRoot }))
-            )
-        },
-        { cacheKeyFn: repoAtCommitCacheKeyFn }
-    )
-
-    const fileContentsLoader = new DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>(
-        async specs => {
-            return await Promise.all(
-                specs.map(({ repository, commit, file }) =>
-                    getFileContent({ repository, commit, repoRoot, file })
+        files: new DataLoader<RepoSpec & CommitSpec, File[]>(
+            async commits => {
+                return await Promise.all(
+                    commits.map(({ repository, commit }) => listFiles({ repository, commit, repoRoot }))
                 )
-            )
-        },
-        {
-            cacheKeyFn: ({ file, ...spec }: RepoSpec & CommitSpec & FileSpec) =>
-                repoAtCommitCacheKeyFn(spec) + `#${file}`,
-        }
-    )
+            },
+            { cacheKeyFn: repoAtCommitCacheKeyFn }
+        ),
 
-    const commitLoader = new DataLoader<RepoSpec & CommitSpec, Commit | null>(
-        async commitSpecs => {
-            const byRepo = groupBy(commitSpecs, commit => commit.repository)
-            const commits = new Map(
-                await Promise.all(
-                    Object.entries(byRepo).map(
-                        async ([repository, commits]) =>
-                            [
-                                repository,
-                                await getCommits({
-                                    repoRoot,
-                                    repository,
-                                    commitShas: commits.map(c => c.commit),
-                                }),
-                            ] as const
+        fileContent: new DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>(
+            async specs => {
+                return await Promise.all(
+                    specs.map(({ repository, commit, file }) =>
+                        getFileContent({ repository, commit, repoRoot, file })
                     )
                 )
-            )
-            return commitSpecs.map(({ repository, commit }) => {
-                const forRepo = commits.get(repository)
-                return (forRepo && forRepo.get(commit)) || null
-            })
-        },
-        { cacheKeyFn: repoAtCommitCacheKeyFn }
-    )
+            },
+            {
+                cacheKeyFn: ({ file, ...spec }: RepoSpec & CommitSpec & FileSpec) =>
+                    repoAtCommitCacheKeyFn(spec) + `#${file}`,
+            }
+        ),
 
-    return {
-        codeSmell: codeSmellByIdLoader,
-        codeSmellLifespanByID: codeSmellLifespanByIdLoader,
-        codeSmellByLifespanIndex: codeSmellByLifespanIndexLoader,
-        codeSmellLifespans: codeSmellLifespansInRepositoryLoader,
-        codeSmellLifespanInstances: codeSmellLifespanInstancesLoader,
-        codeSmellLifespan: codeSmellLifespanLoader,
-        codeSmellsByCommit: codeSmellsByCommitLoader,
-        commit: commitLoader,
-        files: filesLoader,
-        fileContent: fileContentsLoader,
+        commit: new DataLoader<RepoSpec & CommitSpec, Commit | null>(
+            async commitSpecs => {
+                const byRepo = groupBy(commitSpecs, commit => commit.repository)
+                const commits = new Map(
+                    await Promise.all(
+                        Object.entries(byRepo).map(
+                            async ([repository, commits]) =>
+                                [
+                                    repository,
+                                    await getCommits({
+                                        repoRoot,
+                                        repository,
+                                        commitShas: commits.map(c => c.commit),
+                                    }),
+                                ] as const
+                        )
+                    )
+                )
+                return commitSpecs.map(({ repository, commit }) => {
+                    const forRepo = commits.get(repository)
+                    return (forRepo && forRepo.get(commit)) || null
+                })
+            },
+            { cacheKeyFn: repoAtCommitCacheKeyFn }
+        ),
     }
+
+    return loaders
 }
