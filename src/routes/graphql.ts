@@ -223,6 +223,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         },
     })
 
+    var { connectionType: CodeSmellLifespanConnectionType } = connectionDefinitions({
+        nodeType: CodeSmellLifeSpanType,
+    })
+
     var RepositoryType = new GraphQLObjectType({
         name: 'Repository',
         fields: {
@@ -239,7 +243,8 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 // },
             },
             codeSmellLifespans: {
-                type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellLifeSpanType))),
+                args: forwardConnectionArgs,
+                type: GraphQLNonNull(CodeSmellLifespanConnectionType),
             },
         },
     })
@@ -334,9 +339,21 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return createCommitResolver({ commit: sha, repository: this.name }, context)
         }
 
-        async codeSmellLifespans({}, { loaders }: Context): Promise<CodeSmellLifeSpanResolver[]> {
-            const lifespans = await loaders.codeSmellLifespans.load(this.name)
-            return lifespans!.map(lifespan => new CodeSmellLifeSpanResolver(lifespan))
+        async codeSmellLifespans(
+            args: ConnectionArguments,
+            { loaders }: Context
+        ): Promise<Connection<CodeSmellLifeSpanResolver>> {
+            const { edges, pageInfo } = await loaders.codeSmellLifespans.load({
+                repository: this.name,
+                ...args,
+            })
+            return {
+                pageInfo,
+                edges: edges.map(({ node, cursor }) => ({
+                    node: new CodeSmellLifeSpanResolver(node),
+                    cursor,
+                })),
+            }
         }
     }
 

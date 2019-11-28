@@ -35,6 +35,10 @@ export interface File {
     path: string
 }
 
+export interface CodeSmellLifespanSpec {
+    lifespan: UUID
+}
+
 export interface RepoSpec {
     repository: string
 }

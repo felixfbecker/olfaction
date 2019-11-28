@@ -13,6 +13,7 @@ import {
     Location,
     File,
     CodeSmellLifespan,
+    CodeSmellLifespanSpec,
 } from './models'
 import { NullFields, base64encode, parseCursor, isNullArray } from './util'
 import assert from 'assert'
@@ -26,10 +27,13 @@ export interface Loaders {
     /** Loads a code smell lifespan by ID. */
     codeSmellLifespanByID: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan | null>
 
-    codeSmellByLifespanIndex: DataLoader<{ lifespan: UUID; lifespanIndex: number }, CodeSmell | null>
+    codeSmellByLifespanIndex: DataLoader<
+        CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>,
+        CodeSmell | null
+    >
 
     /** Loads the code smell lifespans in a given repository. */
-    codeSmellLifespans: DataLoader<CodeSmellLifespan['repository'], CodeSmellLifespan[]>
+    codeSmellLifespans: DataLoader<RepoSpec & ConnectionArguments, Connection<CodeSmellLifespan>>
 
     /** Loads the entire life span of a given lifespan ID. */
     codeSmellLifespanInstances: DataLoader<CodeSmellLifespan['id'], CodeSmell[] | null>
@@ -53,8 +57,7 @@ const connectionArgsKeyFn = ({ first, after }: ConnectionArguments) => `*${after
  * item before and after than requested (if possible), which will be stripped
  * and used to determine pagination info.
  *
- * @param result The result array from the DB with one more item at the
- * beginning and end.
+ * @param result The result array from the DB with one more item at the beginning and end.
  * @param args The pagination options that were given.
  * @param cursorKey The key that was used to order the result and is used to determine the cursor.
  */
@@ -137,7 +140,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 specs.map(({ repository, commit, first, after }, ordinality) => {
                     assert(!first || first >= 0, 'Parameter first must be positive')
                     const cursor = (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
-                    return { ordinality, repository, commit, first, afterId: cursor && cursor.value }
+                    return { ordinality, repository, commit, first, after: cursor?.value }
                 })
             )
             const result = await db.query<{
@@ -184,26 +187,42 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
     )
 
     const codeSmellLifespansInRepositoryLoader = new DataLoader<
-        CodeSmellLifespan['repository'],
-        CodeSmellLifespan[]
-    >(async repositories => {
+        RepoSpec & ConnectionArguments,
+        Connection<CodeSmellLifespan>
+    >(async specs => {
+        const input = JSON.stringify(
+            specs.map(({ repository, first, after }, ordinality) => {
+                assert(!first || first >= 0, 'Parameter first must be positive')
+                const cursor = (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
+                return { repository, ordinality, first, after: cursor?.value }
+            })
+        )
         const result = await db.query<{
             lifespans: [null] | CodeSmellLifespan[]
         }>(sql`
-            select array_agg(row_to_json(code_smell_lifespans)) as "lifespans"
-            from unnest(${repositories}::text[]) with ordinality as input_repository
-            left join code_smell_lifespans on code_smell_lifespans.repository = input_repository.input_repository
-            group by input_repository.ordinality
-            order by input_repository.ordinality
+            select array_agg(row_to_json(l)) as "lifespans"
+            from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "first" int, "after" uuid)
+            join lateral (
+                select code_smell_lifespans.*
+                from code_smell_lifespans
+                where code_smell_lifespans.repository = input.repository
+                -- pagination:
+                and (input.after is null or code_smell_lifespans.id >= input.after) -- include one before to know whether there is a previous page
+                order by id asc
+                limit input.first + 1 -- query one more to know whether there is a next page
+            ) l on true
+            group by input.ordinality
+            order by input.ordinality
         `)
-        return result.rows.map(row => {
-            if (isNullArray(row.lifespans)) {
-                return []
+        return result.rows.map(({ lifespans }, i) => {
+            const spec = specs[i]
+            if (isNullArray(lifespans)) {
+                lifespans = []
             }
-            for (const lifespan of row.lifespans) {
+            for (const lifespan of lifespans) {
                 codeSmellLifespanByIdLoader.prime(lifespan.id, lifespan)
             }
-            return row.lifespans
+            return connectionFromOverfetchedResult(lifespans, spec, 'id')
         })
     })
 
