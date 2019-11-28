@@ -207,7 +207,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         fields: {
             kind: { type: GraphQLString },
             instances: {
-                type: new GraphQLList(CodeSmellType),
+                type: GraphQLNonNull(CodeSmellConnectionType),
                 description: 'The instances of the code smell throughout commit history.',
             },
             duration: {
@@ -384,9 +384,18 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return `${start}/${end}`
         }
 
-        async instances({}, { loaders }: Context): Promise<CodeSmellResolver[]> {
-            const instances = await loaders.codeSmellLifespanInstances.load(this.lifespan.id)
-            return instances!.map(codeSmell => new CodeSmellResolver(codeSmell))
+        async instances(
+            args: ConnectionArguments,
+            { loaders }: Context
+        ): Promise<Connection<CodeSmellResolver>> {
+            const { pageInfo, edges } = await loaders.codeSmellLifespanInstances.load({
+                lifespan: this.lifespan.id,
+                ...args,
+            })
+            return {
+                pageInfo,
+                edges: edges!.map(({ node, cursor }) => ({ cursor, node: new CodeSmellResolver(node) })),
+            }
         }
     }
 

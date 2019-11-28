@@ -36,7 +36,7 @@ export interface Loaders {
     codeSmellLifespans: DataLoader<RepoSpec & ConnectionArguments, Connection<CodeSmellLifespan>>
 
     /** Loads the entire life span of a given lifespan ID. */
-    codeSmellLifespanInstances: DataLoader<CodeSmellLifespan['id'], CodeSmell[] | null>
+    codeSmellLifespanInstances: DataLoader<CodeSmellLifespanSpec & ConnectionArguments, Connection<CodeSmell>>
 
     /** Loads the lifespan of any given code smell */
     codeSmellLifespan: DataLoader<CodeSmell['id'], CodeSmellLifespan | null>
@@ -189,17 +189,19 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
     const codeSmellLifespansInRepositoryLoader = new DataLoader<
         RepoSpec & ConnectionArguments,
         Connection<CodeSmellLifespan>
-    >(async specs => {
-        const input = JSON.stringify(
-            specs.map(({ repository, first, after }, ordinality) => {
-                assert(!first || first >= 0, 'Parameter first must be positive')
-                const cursor = (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
-                return { repository, ordinality, first, after: cursor?.value }
-            })
-        )
-        const result = await db.query<{
-            lifespans: [null] | CodeSmellLifespan[]
-        }>(sql`
+    >(
+        async specs => {
+            const input = JSON.stringify(
+                specs.map(({ repository, first, after }, ordinality) => {
+                    assert(!first || first >= 0, 'Parameter first must be positive')
+                    const cursor =
+                        (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
+                    return { repository, ordinality, first, after: cursor?.value }
+                })
+            )
+            const result = await db.query<{
+                lifespans: [null] | CodeSmellLifespan[]
+            }>(sql`
             select array_agg(row_to_json(l)) as "lifespans"
             from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "first" int, "after" uuid)
             join lateral (
@@ -214,42 +216,63 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             group by input.ordinality
             order by input.ordinality
         `)
-        return result.rows.map(({ lifespans }, i) => {
-            const spec = specs[i]
-            if (isNullArray(lifespans)) {
-                lifespans = []
-            }
-            for (const lifespan of lifespans) {
-                codeSmellLifespanByIdLoader.prime(lifespan.id, lifespan)
-            }
-            return connectionFromOverfetchedResult(lifespans, spec, 'id')
-        })
-    })
+            return result.rows.map(({ lifespans }, i) => {
+                const spec = specs[i]
+                if (isNullArray(lifespans)) {
+                    lifespans = []
+                }
+                for (const lifespan of lifespans) {
+                    codeSmellLifespanByIdLoader.prime(lifespan.id, lifespan)
+                }
+                return connectionFromOverfetchedResult(lifespans, spec, 'id')
+            })
+        },
+        { cacheKeyFn: args => args.repository + connectionArgsKeyFn(args) }
+    )
 
-    const codeSmellLifespanInstancesLoader = new DataLoader<CodeSmellLifespan['id'], CodeSmell[] | null>(
-        async lifespanIds => {
+    const codeSmellLifespanInstancesLoader = new DataLoader<
+        CodeSmellLifespanSpec & ConnectionArguments,
+        Connection<CodeSmell>
+    >(
+        async specs => {
+            const input = JSON.stringify(
+                specs.map(({ lifespan, first, after }, ordinality) => {
+                    assert(!first || first >= 0, 'Parameter first must be positive')
+                    const cursor =
+                        (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
+                    return { lifespan, ordinality, first, after: cursor?.value }
+                })
+            )
             const result = await db.query<{
-                input: CodeSmellLifespan['id']
                 instances: CodeSmell[] | [null]
             }>(sql`
-                select array_agg(row_to_json(code_smells) order by lifespan_index) as instances, input.input, input.ordinality
-                from unnest(${lifespanIds}::uuid[]) with ordinality as input
-                left join code_smells on input.input = code_smells.lifespan
-                group by input.ordinality, input.input
+                select array_agg(row_to_json(c) order by lifespan_index) as instances
+                from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "first" int, "after" uuid)
+                join lateral (
+                    select code_smells.*
+                    from code_smells
+                    where input.lifespan = code_smells.lifespan
+                    and (input.after is null or code_smells.id >= input.after)
+                    order by id
+                    limit input.first + 1
+                ) c on true
+                group by input.ordinality
                 order by input.ordinality
             `)
-            return result.rows.map((row, i) => {
-                if (isNullArray(row.instances)) {
-                    return null
+            return result.rows.map(({ instances }, i) => {
+                const spec = specs[i]
+                if (isNullArray(instances)) {
+                    instances = []
                 }
-                assert.strictEqual(row.input, lifespanIds[i], 'Lifespan ID should match input')
-                for (const codeSmell of row.instances) {
+                for (const codeSmell of instances) {
                     codeSmellByIdLoader.prime(codeSmell.id, codeSmell)
                 }
-                return row.instances
+                return connectionFromOverfetchedResult(instances, spec, 'id')
             })
-        }
+        },
+        { cacheKeyFn: args => args.lifespan + connectionArgsKeyFn(args) }
     )
+
     const codeSmellLifespanLoader = new DataLoader<CodeSmell['id'], CodeSmellLifespan | null>(
         async codeSmellIds => {
             const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
