@@ -1,5 +1,4 @@
 import {
-    buildSchema,
     formatError,
     GraphQLObjectType,
     GraphQLNonNull,
@@ -11,7 +10,6 @@ import {
     GraphQLInt,
     GraphQLInputObjectType,
 } from 'graphql'
-import { readFileSync } from 'fs'
 import graphQLHTTPServer from 'express-graphql'
 import * as pg from 'pg'
 import { listRepositories, validateRepository, validateCommit, Signature, Commit } from '../git'
@@ -28,15 +26,15 @@ import {
     File,
     CodeSmellLifespan,
 } from '../models'
-import { transaction, keyBy } from '../util'
+import { transaction } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 import {
     connectionDefinitions,
     forwardConnectionArgs,
     Connection,
-    Edge,
     ConnectionArguments,
+    connectionFromArray,
 } from 'graphql-relay'
 import { last } from 'lodash'
 
@@ -70,11 +68,9 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             committer: { type: GraphQLNonNull(SignatureType) },
             parents: { type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CommitType))) },
             files: {
-                type: GraphQLNonNull(GraphQLList(GraphQLNonNull(FileType))),
+                args: forwardConnectionArgs,
+                type: GraphQLNonNull(FileConnectionType),
                 description: 'The files that existed at this commit in the repository',
-                // resolve: ({ repository, sha }: Commit, args: {}, { loaders }: Context): Promise<File[]> => {
-                //     return loaders.files.load({ repository, commit: sha })
-                // },
             },
             codeSmells: {
                 type: GraphQLNonNull(CodeSmellConnectionType),
@@ -97,6 +93,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             commit: { type: GraphQLNonNull(CommitType) },
         },
     })
+    var { connectionType: FileConnectionType } = connectionDefinitions({ nodeType: FileType })
 
     var positionFields = {
         line: {
@@ -365,22 +362,26 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async duration({}, { loaders }: Context): Promise<string> {
-            const { repository } = this.lifespan
-            const instances = (await loaders.codeSmellLifespanInstances.load(this.lifespan.id))!
-            const start = (await loaders.commit.load({ repository, commit: instances[0].commit }))!.committer
-                .date
-            const end = (await loaders.commit.load({ repository, commit: last(instances)!.commit }))!
+            const { repository, id: lifespan } = this.lifespan
+            const instances = (await loaders.codeSmellLifespanInstances.load({ lifespan }))!
+            const start = (await loaders.commit.load({ repository, commit: instances.edges[0].node.commit }))!
                 .committer.date
+            const end = (await loaders.commit.load({
+                repository,
+                commit: last(instances.edges)!.node.commit,
+            }))!.committer.date
             return Duration.between(ZonedDateTime.parse(start), ZonedDateTime.parse(end)).toString()
         }
 
         async interval({}, { loaders }: Context): Promise<string> {
-            const { repository } = this.lifespan
-            const instances = (await loaders.codeSmellLifespanInstances.load(this.lifespan.id))!
-            const start = (await loaders.commit.load({ repository, commit: instances[0].commit }))!.committer
-                .date
-            const end = (await loaders.commit.load({ repository, commit: last(instances)!.commit }))!
+            const { repository, id: lifespan } = this.lifespan
+            const instances = (await loaders.codeSmellLifespanInstances.load({ lifespan }))!
+            const start = (await loaders.commit.load({ repository, commit: instances.edges[0].node.commit }))!
                 .committer.date
+            const end = (await loaders.commit.load({
+                repository,
+                commit: last(instances.edges)!.node.commit,
+            }))!.committer.date
             return `${start}/${end}`
         }
 
@@ -485,9 +486,13 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                     edges: edges.map(({ node, cursor }) => ({ node: new CodeSmellResolver(node), cursor })),
                 }
             },
-            async files({}, { loaders }: Context): Promise<FileResolver[]> {
+            async files(args: ConnectionArguments, { loaders }: Context): Promise<Connection<FileResolver>> {
                 const files = await loaders.files.load(spec)
-                return files.map(file => new FileResolver({ ...spec, file: file.path }))
+
+                return connectionFromArray(
+                    files.map(file => new FileResolver({ ...spec, file: file.path })),
+                    args
+                )
             },
         }
     }

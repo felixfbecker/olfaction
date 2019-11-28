@@ -223,7 +223,7 @@ export async function listFiles({
             throw new AbortError()
         }
         if (err.exitCode === 128 && err.stderr && err.stderr.includes('fatal: not a tree object')) {
-            throw new UnknownCommitError({ repository: repository, commit })
+            throw new UnknownCommitError({ repository, commit })
         }
         throw err
     }
