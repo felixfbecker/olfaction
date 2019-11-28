@@ -14,7 +14,7 @@ import graphQLHTTPServer from 'express-graphql'
 import * as pg from 'pg'
 import { listRepositories, validateRepository, validateCommit } from '../git'
 import sql from 'sql-template-strings'
-import { Loaders, createLoaders } from '../loaders'
+import { Loaders, createLoaders, ForwardConnectionArguments } from '../loaders'
 import {
     Location,
     CodeSmell,
@@ -344,7 +344,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     class RepositoryResolver {
         constructor(public name: string) {}
 
-        async commits(args: ConnectionArguments, { loaders }: Context): Promise<Connection<CommitResolver>> {
+        async commits(
+            args: ForwardConnectionArguments,
+            { loaders }: Context
+        ): Promise<Connection<CommitResolver>> {
             const { edges, pageInfo } = await loaders.commits.load({ ...args, repository: this.name })
             return {
                 pageInfo,
@@ -361,7 +364,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async codeSmellLifespans(
-            args: ConnectionArguments,
+            args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CodeSmellLifeSpanResolver>> {
             const { edges, pageInfo } = await loaders.codeSmellLifespans.load({
@@ -410,7 +413,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async instances(
-            args: ConnectionArguments,
+            args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CodeSmellResolver>> {
             const { pageInfo, edges } = await loaders.codeSmellLifespanInstances.load({
@@ -499,7 +502,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             repository: () => new RepositoryResolver(repository),
             subject: (): string => commit.message.split('\n', 1)[0],
             async codeSmells(
-                args: ConnectionArguments,
+                args: ForwardConnectionArguments,
                 { loaders }: Context
             ): Promise<Connection<CodeSmellResolver>> {
                 const { edges, pageInfo } = await loaders.codeSmellsByCommit.load({ ...spec, ...args })
@@ -508,7 +511,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                     edges: edges.map(({ node, cursor }) => ({ node: new CodeSmellResolver(node), cursor })),
                 }
             },
-            async files(args: ConnectionArguments, { loaders }: Context): Promise<Connection<FileResolver>> {
+            async files(
+                args: ForwardConnectionArguments,
+                { loaders }: Context
+            ): Promise<Connection<FileResolver>> {
                 const files = await loaders.files.load({ repository, commit: commit.sha })
 
                 return connectionFromArray(
@@ -550,7 +556,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         repository({ name }: { name: string }) {
             return new RepositoryResolver(name)
         },
-        async repositories(args: ConnectionArguments): Promise<Connection<RepositoryResolver>> {
+        async repositories(args: ForwardConnectionArguments): Promise<Connection<RepositoryResolver>> {
             const repositoryNames = await listRepositories({ repoRoot })
             return connectionFromArray(
                 repositoryNames.map(name => new RepositoryResolver(name)),

@@ -34,15 +34,18 @@ export interface Loaders {
     >
 
     /** Loads the code smell lifespans in a given repository. */
-    codeSmellLifespans: DataLoader<RepoSpec & ConnectionArguments, Connection<CodeSmellLifespan>>
+    codeSmellLifespans: DataLoader<RepoSpec & ForwardConnectionArguments, Connection<CodeSmellLifespan>>
 
     /** Loads the entire life span of a given lifespan ID. */
-    codeSmellLifespanInstances: DataLoader<CodeSmellLifespanSpec & ConnectionArguments, Connection<CodeSmell>>
+    codeSmellLifespanInstances: DataLoader<
+        CodeSmellLifespanSpec & ForwardConnectionArguments,
+        Connection<CodeSmell>
+    >
 
     /** Loads the lifespan of any given code smell */
     codeSmellLifespan: DataLoader<CodeSmell['id'], CodeSmellLifespan | null>
 
-    codeSmellsByCommit: DataLoader<RepoSpec & CommitSpec & ConnectionArguments, Connection<CodeSmell>>
+    codeSmellsByCommit: DataLoader<RepoSpec & CommitSpec & ForwardConnectionArguments, Connection<CodeSmell>>
 
     files: DataLoader<RepoSpec & CommitSpec, File[]>
     fileContent: DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>
@@ -50,11 +53,11 @@ export interface Loaders {
     commit: DataLoader<RepoSpec & CommitSpec, Commit | null>
 
     /** Loads the existing commit SHAs in a repository */
-    commits: DataLoader<RepoSpec & ConnectionArguments, Connection<Commit>>
+    commits: DataLoader<RepoSpec & ForwardConnectionArguments, Connection<Commit>>
 }
 
 const repoAtCommitCacheKeyFn = ({ repository, commit }: RepoSpec & CommitSpec) => `${repository}@${commit}`
-const connectionArgsKeyFn = ({ first, after }: ConnectionArguments) => `*${after}+${first}`
+const connectionArgsKeyFn = ({ first, after }: ForwardConnectionArguments) => `*${after}+${first}`
 
 /**
  * Creates a connection from a DB result page that was fetched with one more
@@ -67,7 +70,7 @@ const connectionArgsKeyFn = ({ first, after }: ConnectionArguments) => `*${after
  */
 const connectionFromOverfetchedResult = <T extends object>(
     result: T[],
-    { first, after }: ConnectionArguments,
+    { first, after }: ForwardConnectionArguments,
     cursorKey: keyof T
 ): Connection<T> => {
     const edges: Edge<T>[] = IterableX.from(result)
@@ -137,7 +140,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         ),
 
         codeSmellsByCommit: new DataLoader<
-            RepoSpec & CommitSpec & ConnectionArguments,
+            RepoSpec & CommitSpec & ForwardConnectionArguments,
             Connection<CodeSmell>
         >(
             async specs => {
@@ -191,7 +194,10 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             { cacheKeyFn: args => repoAtCommitCacheKeyFn(args) + connectionArgsKeyFn(args) }
         ),
 
-        codeSmellLifespans: new DataLoader<RepoSpec & ConnectionArguments, Connection<CodeSmellLifespan>>(
+        codeSmellLifespans: new DataLoader<
+            RepoSpec & ForwardConnectionArguments,
+            Connection<CodeSmellLifespan>
+        >(
             async specs => {
                 const input = JSON.stringify(
                     specs.map(({ repository, first, after }, ordinality) => {
@@ -233,7 +239,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         ),
 
         codeSmellLifespanInstances: new DataLoader<
-            CodeSmellLifespanSpec & ConnectionArguments,
+            CodeSmellLifespanSpec & ForwardConnectionArguments,
             Connection<CodeSmell>
         >(
             async specs => {
@@ -343,7 +349,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             { cacheKeyFn: repoAtCommitCacheKeyFn }
         ),
 
-        commits: new DataLoader<RepoSpec & ConnectionArguments, Connection<Commit>>(async specs => {
+        commits: new DataLoader<RepoSpec & ForwardConnectionArguments, Connection<Commit>>(async specs => {
             return Promise.all(
                 specs.map(async ({ repository, first, after }) => {
                     try {
