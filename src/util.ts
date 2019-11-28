@@ -1,5 +1,6 @@
 import { Client } from 'pg'
 import sql from 'sql-template-strings'
+import { Connection } from 'graphql-relay'
 
 export function keyBy<K, V>(items: Iterable<V>, by: (value: V) => K): Map<K, V> {
     const map = new Map<K, V>()
@@ -56,3 +57,11 @@ export function parseCursor<T extends object>(after: string, validKeys: Readonly
 export const isNullArray = (arr: [null] | unknown[]): arr is [null] => arr.length === 1 && arr[0] === null
 
 export type NullFields<T> = { [K in keyof T]: null }
+
+/**
+ * Map the nodes in a GraphQL Relay Connection.
+ */
+export const mapConnectionNodes = <T, R>(connection: Connection<T>, fn: (node: T) => R): Connection<R> => ({
+    ...connection,
+    edges: connection.edges.map(edge => ({ ...edge, node: fn(edge.node) })),
+})

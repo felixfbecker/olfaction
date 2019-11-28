@@ -28,7 +28,7 @@ import {
     Commit,
     Signature,
 } from '../models'
-import { transaction } from '../util'
+import { transaction, mapConnectionNodes } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 import {
@@ -348,17 +348,13 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
-            const { edges, pageInfo } = await loaders.commit.forRepository.load({
+            const connection = await loaders.commit.forRepository.load({
                 ...args,
                 repository: this.name,
             })
-            return {
-                pageInfo,
-                edges: edges.map(({ cursor, node }) => ({
-                    cursor,
-                    node: createCommitResolver({ repository: this.name }, node),
-                })),
-            }
+            return mapConnectionNodes(connection, node =>
+                createCommitResolver({ repository: this.name }, node)
+            )
         }
 
         async commit({ sha }: { sha: string }, { loaders }: Context) {
@@ -370,17 +366,11 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CodeSmellLifeSpanResolver>> {
-            const { edges, pageInfo } = await loaders.codeSmellLifespan.forRepository.load({
+            const connection = await loaders.codeSmellLifespan.forRepository.load({
                 repository: this.name,
                 ...args,
             })
-            return {
-                pageInfo,
-                edges: edges.map(({ node, cursor }) => ({
-                    node: new CodeSmellLifeSpanResolver(node),
-                    cursor,
-                })),
-            }
+            return mapConnectionNodes(connection, node => new CodeSmellLifeSpanResolver(node))
         }
     }
 
@@ -512,11 +502,8 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 args: ForwardConnectionArguments,
                 { loaders }: Context
             ): Promise<Connection<CodeSmellResolver>> {
-                const { edges, pageInfo } = await loaders.codeSmell.forCommit.load({ ...spec, ...args })
-                return {
-                    pageInfo,
-                    edges: edges.map(({ node, cursor }) => ({ node: new CodeSmellResolver(node), cursor })),
-                }
+                const connection = await loaders.codeSmell.forCommit.load({ ...spec, ...args })
+                return mapConnectionNodes(connection, node => new CodeSmellResolver(node))
             },
             async files(
                 args: ForwardConnectionArguments,
