@@ -3,6 +3,8 @@ import * as HttpStatus from 'http-status-codes'
 
 export class UnknownCodeSmellLifespanError extends Error {
     public readonly name = 'UnknownCodeSmellLifespanError'
+    public readonly status = HttpStatus.NOT_FOUND
+
     constructor({ lifespan }: CodeSmellLifespanSpec) {
         super(`Could not find code smell lifespan with id ${lifespan}`)
     }
@@ -10,6 +12,8 @@ export class UnknownCodeSmellLifespanError extends Error {
 
 export class UnknownCodeSmellError extends Error {
     public readonly name: 'UnknownCodeSmellError'
+    public readonly status: typeof HttpStatus.NOT_FOUND
+
     constructor(spec: CodeSmellSpec | (CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>)) {
         if ('codeSmell' in spec) {
             super(`Could not find code smell with id ${spec.codeSmell}`)
@@ -19,10 +23,12 @@ export class UnknownCodeSmellError extends Error {
             )
         }
         this.name = 'UnknownCodeSmellError'
+        this.status = HttpStatus.NOT_FOUND
     }
 }
 
 export class UnknownCommitError extends Error {
+    public readonly status = HttpStatus.NOT_FOUND
     constructor({ repository, commit }: RepoSpec & CommitSpec) {
         super(
             `Commit ${commit} of repository ${repository} is not known to server. Please make sure the commit was pushed with \`git push\` first.`

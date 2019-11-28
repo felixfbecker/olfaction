@@ -7,12 +7,23 @@ import { RepoRootSpec, CodeSmell } from '../models'
 import * as HttpStatus from 'http-status-codes'
 import { Client } from 'pg'
 import sql from 'sql-template-strings'
+import gql from 'tagged-template-noop'
+import { graphql } from 'graphql'
+import { GraphQLHandler, createGraphQLContext } from './graphql'
+import { dataOrErrors } from '../util'
+import LinkHeader from 'http-link-header'
+import { Connection } from 'graphql-relay'
+import originalUrl from 'original-url'
 
-export const createRestRouter = ({ repoRoot, db }: RepoRootSpec & { db: Client }): Router => {
+export const createRestRouter = ({
+    repoRoot,
+    db,
+    graphQLHandler,
+}: RepoRootSpec & { db: Client; graphQLHandler: GraphQLHandler }): Router => {
     const router = Router()
 
     router.post<{ repository: string; commit: string }>(
-        '/repositories/:repository/commits/:commit/codesmells',
+        '/repositories/:repository/commits/:commit/code-smells',
         wrap(async (req, res) => {
             const { repository, commit } = req.params
             const { kind, message, locations } = req.body
@@ -23,7 +34,7 @@ export const createRestRouter = ({ repoRoot, db }: RepoRootSpec & { db: Client }
                 commit
             )
             const result = await db.query(sql`
-                INSERT INTO code_smells (kind, message, locations, commit_id, commit_date)
+                INSERT INTO code_smells (kind, "message", locations, commit_id, commit_date)
                 VALUES (${kind}, ${message}, ${locations}, ${commit}, ${commitData!.committer.date})
                 RETURNING id
             `)
@@ -38,44 +49,65 @@ export const createRestRouter = ({ repoRoot, db }: RepoRootSpec & { db: Client }
         })
     )
 
-    router.get<{ repository: string; commit: string }>(
-        '/repositories/:repository/commits/:commit/codesmells',
+    router.get<{ repository: string }>(
+        '/repositories/:repository/code-smell-lifespans',
         wrap(async (req, res) => {
-            const { repository, commit } = req.params
+            const { repository } = req.params
+            const { kind, first, after } = req.query
 
-            await git.validateRepository({ repository, repoRoot })
-            await git.validateCommit({ repository, commit, repoRoot })
+            const query = gql`
+                query($repository: String!, $kind: String, $first: Int, $after: String) {
+                    repository(name: $repository) {
+                        codeSmellLifespans(kind: $kind, first: $first, after: $after) {
+                            edges {
+                                node {
+                                    id
+                                    kind
+                                    interval
+                                    duration
+                                }
+                            }
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
+                        }
+                    }
+                }
+            `
+            const contextValue = createGraphQLContext({ db, repoRoot })
+            const data = dataOrErrors(
+                await graphql({
+                    ...graphQLHandler,
+                    contextValue,
+                    source: query,
+                    variableValues: {
+                        repository,
+                        kind,
+                        first: (first && parseInt(first)) || 50,
+                        after,
+                    },
+                })
+            )
 
-            const result = await db.query(sql`
-                SELECT *
-                FROM code_smells
-                WHERE repository = ${repository} AND commit_id = ${commit}
-            `)
+            const connection: Connection<any> = data.repository.codeSmellLifespans
+            const lifeSpans = connection.edges.map((edge: any) => edge.node)
 
-            const codeSmells = result.rows
-
-            res.json(codeSmells)
+            if (connection.pageInfo.hasNextPage && connection.pageInfo.endCursor) {
+                const link = new LinkHeader()
+                const uri = new URL(originalUrl(req))
+                uri.searchParams.set('after', connection.pageInfo.endCursor)
+                link.set({ uri: uri.href, rel: 'next' })
+                res.setHeader('Link', link.toString())
+            }
+            res.json(lifeSpans)
         })
     )
 
-    router.get<{ repository: string }>(
-        '/repositories/:repository/codesmells',
+    router.get<{ repository: string; commit: string }>(
+        '/repositories/:repository/commits/:commit/code-smells',
         wrap(async (req, res) => {
-            const { repository } = req.params
-            const { kind } = req.query
-            const query = sql`
-                SELECT *
-                FROM code_smells
-                WHERE repository = ${repository}
-                ORDER BY commit_date DESC
-            `
-            if (kind) {
-                query.append(sql`AND kind = ${kind}`)
-            }
-            const result = await db.query<CodeSmell>(query)
-            const codeSmells = result.rows
-
-            res.json(codeSmells)
+            const { repository, commit } = req.params
         })
     )
     return router

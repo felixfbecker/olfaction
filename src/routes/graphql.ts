@@ -10,7 +10,7 @@ import {
     GraphQLInt,
     GraphQLInputObjectType,
 } from 'graphql'
-import graphQLHTTPServer from 'express-graphql'
+import graphQLHTTPServer, { OptionsData } from 'express-graphql'
 import * as pg from 'pg'
 import { listRepositories, validateRepository, validateCommit } from '../git'
 import sql from 'sql-template-strings'
@@ -27,24 +27,23 @@ import {
     CodeSmellLifespan,
     Commit,
     Signature,
+    RepoRootSpec,
 } from '../models'
 import { transaction, mapConnectionNodes } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
-import {
-    connectionDefinitions,
-    forwardConnectionArgs,
-    Connection,
-    ConnectionArguments,
-    connectionFromArray,
-} from 'graphql-relay'
+import { connectionDefinitions, forwardConnectionArgs, Connection, connectionFromArray } from 'graphql-relay'
 import { last } from 'lodash'
 
 interface Context {
     loaders: Loaders
 }
 
-export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot: string }) {
+export interface GraphQLHandler {
+    rootValue: unknown
+    schema: GraphQLSchema
+}
+export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot: string }): GraphQLHandler {
     var encodingArg: GraphQLFieldConfigArgumentMap = {
         encoding: {
             type: GraphQLString,
@@ -205,7 +204,12 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         name: 'CodeSmellLifeSpan',
         description: 'A lifespan of a code smell throughout commit history.',
         fields: {
-            kind: { type: GraphQLString },
+            id: {
+                type: GraphQLNonNull(GraphQLID),
+            },
+            kind: {
+                type: GraphQLString,
+            },
             instances: {
                 args: forwardConnectionArgs,
                 type: GraphQLNonNull(CodeSmellConnectionType),
@@ -248,7 +252,12 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 // },
             },
             codeSmellLifespans: {
-                args: forwardConnectionArgs,
+                args: {
+                    ...forwardConnectionArgs,
+                    kind: {
+                        type: GraphQLString,
+                    },
+                },
                 type: GraphQLNonNull(CodeSmellLifespanConnectionType),
             },
         },
@@ -292,7 +301,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         },
     })
 
-    const dynamicSchema = new GraphQLSchema({
+    const schema = new GraphQLSchema({
         query: new GraphQLObjectType({
             name: 'Query',
             fields: {
@@ -363,12 +372,13 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async codeSmellLifespans(
-            args: ForwardConnectionArguments,
+            { kind, ...args }: { kind?: string | null } & ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CodeSmellLifeSpanResolver>> {
             const connection = await loaders.codeSmellLifespan.forRepository.load({
-                repository: this.name,
                 ...args,
+                repository: this.name,
+                kind: kind || undefined,
             })
             return mapConnectionNodes(connection, node => new CodeSmellLifeSpanResolver(node))
         }
@@ -376,6 +386,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
     class CodeSmellLifeSpanResolver {
         constructor(private lifespan: CodeSmellLifespan) {}
+
+        get id(): UUID {
+            return this.lifespan.id
+        }
 
         get kind(): string {
             return this.lifespan.kind
@@ -610,15 +624,19 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         ...mutation,
     }
 
-    return graphQLHTTPServer(() => {
-        const context: Context = {
-            loaders: createLoaders({ db, repoRoot }),
-        }
+    return { schema, rootValue }
+}
+
+export const createGraphQLContext = (options: { db: pg.Client } & RepoRootSpec) => ({
+    loaders: createLoaders(options),
+})
+
+export const createGraphQLHTTPHandler = (options: GraphQLHandler & { db: pg.Client } & RepoRootSpec) =>
+    graphQLHTTPServer(() => {
         return {
-            schema: dynamicSchema,
-            rootValue,
+            ...options,
+            context: createGraphQLContext(options),
             graphiql: true,
-            context,
             customFormatErrorFn: err => {
                 console.error(err.originalError)
                 return {
@@ -629,4 +647,3 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             },
         }
     })
-}

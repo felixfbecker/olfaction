@@ -1,6 +1,7 @@
 import { Client } from 'pg'
 import sql from 'sql-template-strings'
 import { Connection } from 'graphql-relay'
+import { ExecutionResult } from 'graphql'
 
 export function keyBy<K, V>(items: Iterable<V>, by: (value: V) => K): Map<K, V> {
     const map = new Map<K, V>()
@@ -74,4 +75,11 @@ export function asError(value: unknown): Error {
         return new Error(value)
     }
     return new Error()
+}
+
+export function dataOrErrors<D>(result: ExecutionResult<D>): D {
+    if (result.errors) {
+        throw result.errors[0].originalError ?? result.errors[0]
+    }
+    return result.data!
 }

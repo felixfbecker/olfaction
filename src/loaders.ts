@@ -35,7 +35,10 @@ export interface Loaders {
         /** Loads a code smell lifespan by ID. */
         byId: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>
         /** Loads the code smell lifespans in a given repository. */
-        forRepository: DataLoader<RepoSpec & ForwardConnectionArguments, Connection<CodeSmellLifespan>>
+        forRepository: DataLoader<
+            RepoSpec & { kind?: string } & ForwardConnectionArguments,
+            Connection<CodeSmellLifespan>
+        >
         /** Loads the lifespan of any given code smell */
         forCodeSmell: DataLoader<CodeSmell['id'], CodeSmellLifespan>
     }
@@ -259,22 +262,23 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             forRepository: new DataLoader(
                 async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ repository, first, after }, ordinality) => {
+                        specs.map(({ repository, kind, first, after }, ordinality) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
                                 (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
-                            return { repository, ordinality, first, after: cursor?.value }
+                            return { ordinality, repository, kind, first, after: cursor?.value }
                         })
                     )
                     const result = await db.query<{
                         lifespans: [null] | CodeSmellLifespan[]
                     }>(sql`
                         select array_agg(row_to_json(l)) as "lifespans"
-                        from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "first" int, "after" uuid)
+                        from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "kind" text, "first" int, "after" uuid)
                         join lateral (
                             select code_smell_lifespans.*
                             from code_smell_lifespans
                             where code_smell_lifespans.repository = input.repository
+                            and (input.kind is null or code_smell_lifespans.kind = input.kind)
                             -- pagination:
                             and (input.after is null or code_smell_lifespans.id >= input.after) -- include one before to know whether there is a previous page
                             order by id asc
@@ -294,7 +298,10 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         return connectionFromOverfetchedResult(lifespans, spec, 'id')
                     })
                 },
-                { cacheKeyFn: args => args.repository + connectionArgsKeyFn(args) }
+                {
+                    cacheKeyFn: args =>
+                        args.repository + (args.kind ? '?kind=' + args.kind : '') + connectionArgsKeyFn(args),
+                }
             ),
 
             forCodeSmell: new DataLoader<CodeSmell['id'], CodeSmellLifespan>(async codeSmellIds => {
