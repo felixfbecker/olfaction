@@ -348,7 +348,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
-            const { edges, pageInfo } = await loaders.commits.load({ ...args, repository: this.name })
+            const { edges, pageInfo } = await loaders.commit.forRepository.load({
+                ...args,
+                repository: this.name,
+            })
             return {
                 pageInfo,
                 edges: edges.map(({ cursor, node }) => ({
@@ -359,7 +362,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async commit({ sha }: { sha: string }, { loaders }: Context) {
-            const commit = await loaders.commit.load({ repository: this.name, commit: sha })
+            const commit = await loaders.commit.bySha.load({ repository: this.name, commit: sha })
             return commit && createCommitResolver({ repository: this.name }, commit)
         }
 
@@ -367,7 +370,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CodeSmellLifeSpanResolver>> {
-            const { edges, pageInfo } = await loaders.codeSmellLifespans.load({
+            const { edges, pageInfo } = await loaders.codeSmellLifespan.forRepository.load({
                 repository: this.name,
                 ...args,
             })
@@ -390,10 +393,12 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
         async duration({}, { loaders }: Context): Promise<string> {
             const { repository, id: lifespan } = this.lifespan
-            const instances = (await loaders.codeSmellLifespanInstances.load({ lifespan }))!
-            const start = (await loaders.commit.load({ repository, commit: instances.edges[0].node.commit }))!
-                .committer.date
-            const end = (await loaders.commit.load({
+            const instances = (await loaders.codeSmell.forLifespan.load({ lifespan }))!
+            const start = (await loaders.commit.bySha.load({
+                repository,
+                commit: instances.edges[0].node.commit,
+            }))!.committer.date
+            const end = (await loaders.commit.bySha.load({
                 repository,
                 commit: last(instances.edges)!.node.commit,
             }))!.committer.date
@@ -402,10 +407,12 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
         async interval({}, { loaders }: Context): Promise<string> {
             const { repository, id: lifespan } = this.lifespan
-            const instances = (await loaders.codeSmellLifespanInstances.load({ lifespan }))!
-            const start = (await loaders.commit.load({ repository, commit: instances.edges[0].node.commit }))!
-                .committer.date
-            const end = (await loaders.commit.load({
+            const instances = (await loaders.codeSmell.forLifespan.load({ lifespan }))!
+            const start = (await loaders.commit.bySha.load({
+                repository,
+                commit: instances.edges[0].node.commit,
+            }))!.committer.date
+            const end = (await loaders.commit.bySha.load({
                 repository,
                 commit: last(instances.edges)!.node.commit,
             }))!.committer.date
@@ -416,7 +423,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CodeSmellResolver>> {
-            const { pageInfo, edges } = await loaders.codeSmellLifespanInstances.load({
+            const { pageInfo, edges } = await loaders.codeSmell.forLifespan.load({
                 lifespan: this.lifespan.id,
                 ...args,
             })
@@ -436,11 +443,11 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return this.codeSmell.message
         }
         async lifeSpan({}, { loaders }: Context) {
-            const lifespan = (await loaders.codeSmellLifespan.load(this.codeSmell.id))!
+            const lifespan = (await loaders.codeSmellLifespan.forCodeSmell.load(this.codeSmell.id))!
             return new CodeSmellLifeSpanResolver(lifespan)
         }
         async predecessor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmellByLifespanIndex.load({
+            const codeSmell = await loaders.codeSmell.byLifespanIndex.load({
                 lifespan: this.codeSmell.lifespan,
                 lifespanIndex: this.codeSmell.lifespanIndex - 1,
             })
@@ -448,7 +455,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async successor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmellByLifespanIndex.load({
+            const codeSmell = await loaders.codeSmell.byLifespanIndex.load({
                 lifespan: this.codeSmell.lifespan,
                 lifespanIndex: this.codeSmell.lifespanIndex + 1,
             })
@@ -456,13 +463,13 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async commit({}, { loaders }: Context): Promise<CommitResolver> {
-            const { repository } = (await loaders.codeSmellLifespan.load(this.codeSmell.id))!
-            const commit = await loaders.commit.load({ repository, commit: this.codeSmell.commit })
+            const { repository } = (await loaders.codeSmellLifespan.forCodeSmell.load(this.codeSmell.id))!
+            const commit = await loaders.commit.bySha.load({ repository, commit: this.codeSmell.commit })
             return createCommitResolver({ repository }, commit!)
         }
 
         async locations({}, { loaders }: Context) {
-            const { repository } = (await loaders.codeSmellLifespan.load(this.codeSmell.id))!
+            const { repository } = (await loaders.codeSmellLifespan.forCodeSmell.load(this.codeSmell.id))!
             return this.codeSmell.locations.map(
                 location => new LocationResolver({ ...location, ...this.codeSmell, repository })
             )
@@ -505,7 +512,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 args: ForwardConnectionArguments,
                 { loaders }: Context
             ): Promise<Connection<CodeSmellResolver>> {
-                const { edges, pageInfo } = await loaders.codeSmellsByCommit.load({ ...spec, ...args })
+                const { edges, pageInfo } = await loaders.codeSmell.forCommit.load({ ...spec, ...args })
                 return {
                     pageInfo,
                     edges: edges.map(({ node, cursor }) => ({ node: new CodeSmellResolver(node), cursor })),
@@ -540,7 +547,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async commit({}, { loaders }: Context) {
-            const commit = await loaders.commit.load(this.spec)
+            const commit = await loaders.commit.bySha.load(this.spec)
             return commit && createCommitResolver(this.spec, commit)
         }
 
@@ -564,7 +571,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             )
         },
         async codeSmell({ id }: { id: UUID }, { loaders }: Context) {
-            const codeSmell = await loaders.codeSmell.load(id)
+            const codeSmell = await loaders.codeSmell.byId.load(id)
             return codeSmell && new CodeSmellResolver(codeSmell)
         },
     }
@@ -602,7 +609,8 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                             returning   id, "commit", "message", locations, lifespan, lifespan_index
                         `)
                         const codeSmell = result.rows[0]
-                        loaders.codeSmell.prime(codeSmell.id, codeSmell)
+                        loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
+                        loaders.codeSmell.byLifespanIndex.prime(codeSmell, codeSmell)
                         return new CodeSmellResolver(codeSmell)
                     })
                 )
