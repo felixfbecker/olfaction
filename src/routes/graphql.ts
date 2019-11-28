@@ -204,6 +204,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         fields: {
             kind: { type: GraphQLString },
             instances: {
+                args: forwardConnectionArgs,
                 type: GraphQLNonNull(CodeSmellConnectionType),
                 description: 'The instances of the code smell throughout commit history.',
             },
@@ -244,6 +245,9 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 type: GraphQLNonNull(CodeSmellLifespanConnectionType),
             },
         },
+    })
+    var { connectionType: RepositoryConnectionType } = connectionDefinitions({
+        nodeType: RepositoryType,
     })
 
     interface CodeSmellInput {
@@ -304,7 +308,8 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                     },
                 },
                 repositories: {
-                    type: GraphQLNonNull(GraphQLList(RepositoryType)),
+                    args: forwardConnectionArgs,
+                    type: GraphQLNonNull(RepositoryConnectionType),
                 },
             },
         }),
@@ -526,9 +531,12 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         repository({ name }: { name: string }) {
             return new RepositoryResolver(name)
         },
-        async repositories() {
+        async repositories(args: ConnectionArguments): Promise<Connection<RepositoryResolver>> {
             const repositoryNames = await listRepositories({ repoRoot })
-            return repositoryNames.map(name => new RepositoryResolver(name))
+            return connectionFromArray(
+                repositoryNames.map(name => new RepositoryResolver(name)),
+                args
+            )
         },
         async codeSmell({ id }: { id: UUID }, { loaders }: Context) {
             const codeSmell = await loaders.codeSmell.load(id)

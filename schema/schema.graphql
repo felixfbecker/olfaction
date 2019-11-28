@@ -94,7 +94,7 @@ type CodeSmellLifeSpan {
   """
   The instances of the code smell throughout commit history.
   """
-  instances: [CodeSmell]
+  instances(after: String, first: Int): CodeSmellConnection!
 
   """
   The duration this code smell was present in the codebase as an ISO8601 duration string
@@ -107,6 +107,36 @@ type CodeSmellLifeSpan {
   interval: String!
 }
 
+"""
+A connection to a list of items.
+"""
+type CodeSmellLifeSpanConnection {
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+
+  """
+  A list of edges.
+  """
+  edges: [CodeSmellLifeSpanEdge]
+}
+
+"""
+An edge in a connection.
+"""
+type CodeSmellLifeSpanEdge {
+  """
+  The item at the end of the edge
+  """
+  node: CodeSmellLifeSpan
+
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
+}
+
 type Commit {
   sha: String!
   message: String!
@@ -117,7 +147,7 @@ type Commit {
   """
   The files that existed at this commit in the repository
   """
-  files: [File!]!
+  files(after: String, first: Int): FileConnection!
   codeSmells(after: String, first: Int): CodeSmellConnection!
 }
 
@@ -135,6 +165,36 @@ type File {
   ): String
   linesCount: Int
   commit: Commit!
+}
+
+"""
+A connection to a list of items.
+"""
+type FileConnection {
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+
+  """
+  A list of edges.
+  """
+  edges: [FileEdge]
+}
+
+"""
+An edge in a connection.
+"""
+type FileEdge {
+  """
+  The item at the end of the edge
+  """
+  node: File
+
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
 }
 
 type Location {
@@ -226,7 +286,7 @@ type Query {
     """
     name: String!
   ): Repository
-  repositories: [Repository]!
+  repositories(after: String, first: Int): RepositoryConnection!
 }
 
 type Range {
@@ -256,7 +316,37 @@ input RangeInput {
 type Repository {
   name: String
   commit(sha: String!): Commit
-  codeSmellLifespans: [CodeSmellLifeSpan!]!
+  codeSmellLifespans(after: String, first: Int): CodeSmellLifeSpanConnection!
+}
+
+"""
+A connection to a list of items.
+"""
+type RepositoryConnection {
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+
+  """
+  A list of edges.
+  """
+  edges: [RepositoryEdge]
+}
+
+"""
+An edge in a connection.
+"""
+type RepositoryEdge {
+  """
+  The item at the end of the edge
+  """
+  node: Repository
+
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
 }
 
 type Signature {
