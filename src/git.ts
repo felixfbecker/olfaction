@@ -239,10 +239,13 @@ export const log = ({
     repoRoot,
     repository,
     commit = 'HEAD',
-}: RepoRootSpec & RepoSpec & Partial<CommitSpec>): AsyncIterableX<Commit> => {
-    const gitProcess = exec('git', ['log', '-z', `--format=${commitFormat}`, commit, '--'], {
-        cwd: path.join(repoRoot, repository),
-    })
+    grep,
+}: RepoRootSpec & RepoSpec & Partial<CommitSpec> & { grep?: string }): AsyncIterableX<Commit> => {
+    const gitProcess = exec(
+        'git',
+        ['log', '-z', `--format=${commitFormat}`, ...(grep ? [`--grep=${grep}`] : []), commit, '--'],
+        { cwd: path.join(repoRoot, repository) }
+    )
     return AsyncIterableX.from(gitProcess.stdout!)
         .catchWith<Buffer>(err => {
             if (err.killed) {

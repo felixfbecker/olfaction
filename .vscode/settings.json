@@ -5,6 +5,6 @@
     "**/.git": true,
     "**/node_modules": true,
     "**/bower_components": true,
-    "**/out": true
+    "**/out/**": true
   }
 }

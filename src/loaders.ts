@@ -19,6 +19,7 @@ import assert from 'assert'
 import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
 import { UnknownCodeSmellError, UnknownCommitError, UnknownCodeSmellLifespanError } from './errors'
+import objectHash from 'object-hash'
 
 export type ForwardConnectionArguments = Pick<ConnectionArguments, 'first' | 'after'>
 
@@ -47,7 +48,10 @@ export interface Loaders {
         bySha: DataLoader<RepoSpec & CommitSpec, Commit>
 
         /** Loads the existing commit SHAs in a repository */
-        forRepository: DataLoader<RepoSpec & ForwardConnectionArguments, Connection<Commit>>
+        forRepository: DataLoader<
+            RepoSpec & ForwardConnectionArguments & { grep?: string },
+            Connection<Commit>
+        >
     }
 
     files: DataLoader<RepoSpec & CommitSpec, File[]>
@@ -387,15 +391,15 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 { cacheKeyFn: repoAtCommitCacheKeyFn }
             ),
 
-            forRepository: new DataLoader<RepoSpec & ForwardConnectionArguments, Connection<Commit>>(
+            forRepository: new DataLoader(
                 async specs => {
                     return Promise.all(
-                        specs.map(async ({ repository, first, after }) => {
+                        specs.map(async ({ repository, first, after, grep }) => {
                             try {
                                 const cursor =
                                     (after && parseCursor<Commit>(after, new Set(['sha']))) || undefined
                                 const commits = await git
-                                    .log({ repository, commit: cursor?.value, repoRoot })
+                                    .log({ repository, commit: cursor?.value, grep, repoRoot })
                                     .tap((commit: Commit) =>
                                         loaders.commit.bySha.prime({ repository, commit: commit.sha }, commit)
                                     )
@@ -411,7 +415,8 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             }
                         })
                     )
-                }
+                },
+                { cacheKeyFn: objectHash }
             ),
         },
     }

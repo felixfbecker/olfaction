@@ -237,7 +237,14 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         fields: {
             name: { type: GraphQLString },
             commits: {
-                args: forwardConnectionArgs,
+                args: {
+                    ...forwardConnectionArgs,
+                    grep: {
+                        type: GraphQLString,
+                        description:
+                            'Limit the commits to ones with log message that matches the specified pattern (regular expression).',
+                    },
+                },
                 type: GraphQLNonNull(CommitConnectionType),
             },
             commit: {
@@ -354,7 +361,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         constructor(public name: string) {}
 
         async commits(
-            args: ForwardConnectionArguments,
+            args: ForwardConnectionArguments & { grep?: string },
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
             const connection = await loaders.commit.forRepository.load({
