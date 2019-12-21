@@ -1,6 +1,6 @@
 import 'source-map-support'
 
-import express from 'express'
+import express, { Request, Response, NextFunction } from 'express'
 import { Client } from 'pg'
 import * as path from 'path'
 import { createGraphQLHandler, createGraphQLHTTPHandler } from './routes/graphql'
@@ -28,6 +28,11 @@ async function main() {
     app.use('/graphql', createGraphQLHTTPHandler({ ...graphQLHandler, db, repoRoot }))
 
     app.use('/rest', createRestRouter({ repoRoot, db, graphQLHandler }))
+
+    app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+        console.error(err)
+        res.status(err.status ?? 500).json({ ...err, message: err.message })
+    })
 
     const server = await new Promise<Server>((resolve, reject) => {
         let server: Server
