@@ -5,5 +5,5 @@ indent_style = space
 charset = utf-8
 insert_final_newline = true
 
-[*.ts]
+[*.{ts,ps1}]
 indent_size = 4
