@@ -1,0 +1,97 @@
+@startuml GraphQL
+hide circle
+hide empty members
+
+class Query {
+  {method} +repository(name: String!): Repository
+  {method} +repositories: Connection<Repository>!
+}
+Query --> Repository
+
+class Repository {
+  +name: String!
+  {method} +commit(sha: String!): Commit
+  {method} +commits: Connection<Commit>!
+  {method} +codeSmellLifespans: Connection<CodeSmellLifespan>!
+}
+Repository "1" *-- "0..*" Commit
+Repository "1" *-- "0..*" CodeSmellLifespan
+
+class Commit {
+  +sha: String!
+  +committer: Signature!
+  +author: Signature!
+  {method} +files: Connection<File>!
+  {method} +changedFiles: Connection<File>!
+}
+Commit --> Signature
+Commit "1" *-- "0..*" CodeSmell
+Commit "1" *-- "0..*" File
+
+class Signature {
+  +name: String!
+  +email: String!
+  +date: String!
+}
+
+class CodeSmell {
+  +id: ID!
+  +message: String!
+  +commit: Commit!
+  +locations: [Location!]!
+  +lifespanIndex: Int!
+  {method} +lifespan: CodeSmellLifespan!
+}
+CodeSmell "1..n" --> "0..n" Location
+
+class Location {
+  +file: File!
+  +range: Range!
+  +contents(encoding: String): String!
+}
+Location --> Range
+Location --> File
+class Range {
+  +start: Position!
+  +end: Position!
+}
+Range --> Position
+class Position {
+  +line: Int!
+  +character: Int!
+}
+
+class CodeSmellLifespan {
+  +id: ID!
+  +kind: String!
+  +repository: Repository!
+  +duration: String!
+  +interval: String!
+  {method} +instances: Connection<CodeSmell>!
+}
+CodeSmellLifespan "1" *-- "1..n" CodeSmell
+
+class File {
+  +path: String!
+  +linesCount: Int!
+  +contents(encoding: String): String!
+}
+
+namespace Relay {
+  interface Connection<TNode> {
+    +pageInfo: PageInfo!
+    +edges: [Edge<TNode>!]!
+  }
+  Connection --> Edge
+  Connection --> PageInfo
+  class PageInfo {
+    +endCursor: String!
+    +hasNextPage: Boolean!
+    +hasPreviousPage: Boolean!
+  }
+  interface Edge<TNode> {
+    +node: TNode!
+    +cursor: String!
+  }
+}
+@enduml

@@ -1,0 +1,37 @@
+@startuml Database
+hide circle
+hide empty members
+
+entity code_smell_lifespans {
+  *id UUID <<PK>>
+  *kind TEXT
+  *repository TEXT
+}
+
+entity code_smells {
+  *id UUID <<PK>>
+  *message TEXT
+  *commit TEXT
+  *lifespan UUID <<FK>>
+  *lifespan_index INTEGER
+  locations JSONB
+}
+
+code_smells ||-- code_smell_lifespans
+
+' entity file_links {
+'   *from_path TEXT
+'   *from_commit TEXT
+'   *from_start_line INTEGER
+'   *from_end_line INTEGER
+'   *from_start_character INTEGER
+'   *from_end_character INTEGER
+'   *to_path TEXT
+'   *to_commit TEXT
+'   *to_start_line INTEGER
+'   *to_end_line INTEGER
+'   *to_start_character INTEGER
+'   *to_end_character INTEGER
+' }
+
+@enduml
