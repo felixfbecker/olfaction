@@ -2,3 +2,5 @@ node_modules/
 out/
 /repos/
 *.tsbuildinfo
+
+.DS_Store
