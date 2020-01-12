@@ -348,7 +348,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                             type: GraphQLNonNull(GraphQLString),
                         },
                         codeSmells: {
-                            type: GraphQLNonNull(GraphQLList(CodeSmellInputType)),
+                            type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellInputType))),
                         },
                     },
                     type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellType))),
