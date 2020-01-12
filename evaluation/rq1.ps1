@@ -49,7 +49,7 @@ $body = (@{
 } | ConvertTo-Json)
 
 Invoke-RestMethod -Body $body |
-    ForEach-Object { $_.repositories.edges } |
+    ForEach-Object { $_.data.repositories.edges } |
     ForEach-Object {
         $repo = $_
         $headCommitDate = $repo.headCommit.edges[0].node.author.date
