@@ -14,13 +14,11 @@ export class UnknownCodeSmellError extends Error {
     public readonly name: 'UnknownCodeSmellError'
     public readonly status: typeof HttpStatus.NOT_FOUND
 
-    constructor(spec: CodeSmellSpec | (CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>)) {
+    constructor(spec: CodeSmellSpec | (CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>)) {
         if ('codeSmell' in spec) {
             super(`Could not find code smell with id ${spec.codeSmell}`)
         } else {
-            super(
-                `Could not find code smell with lifespan ID ${spec.lifespan} and index ${spec.lifespanIndex}`
-            )
+            super(`Could not find code smell with lifespan ID ${spec.lifespan} and index ${spec.ordinal}`)
         }
         this.name = 'UnknownCodeSmellError'
         this.status = HttpStatus.NOT_FOUND

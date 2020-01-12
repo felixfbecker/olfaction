@@ -67,7 +67,7 @@ input CodeSmellInput {
   A client-provided ID to associate code smell instances in multiple commits as part of the same code smell lifespan
   """
   lifespan: ID!
-  lifespanIndex: Int!
+  ordinal: Int!
 
   """
   An arbitrary string that uniquely identifies the kind of code smell, e.g. "GodClass". Must be the same for every instance.
@@ -89,6 +89,7 @@ input CodeSmellInput {
 A lifespan of a code smell throughout commit history.
 """
 type CodeSmellLifeSpan {
+  id: ID!
   kind: String
 
   """
@@ -251,7 +252,7 @@ input LocationInput {
 }
 
 type Mutation {
-  addCodeSmells(repository: String!, commit: String!, codeSmells: [CodeSmellInput]!): [CodeSmell!]!
+  addCodeSmells(repository: String!, commit: String!, codeSmells: [CodeSmellInput!]!): [CodeSmell!]!
 }
 
 """
@@ -345,9 +346,17 @@ input RangeInput {
 
 type Repository {
   name: String
-  commits(after: String, first: Int): CommitConnection!
+  commits(
+    after: String
+    first: Int
+
+    """
+    Limit the commits to ones with log message that matches the specified pattern (regular expression).
+    """
+    grep: String
+  ): CommitConnection!
   commit(sha: String!): Commit
-  codeSmellLifespans(after: String, first: Int): CodeSmellLifeSpanConnection!
+  codeSmellLifespans(after: String, first: Int, kind: String): CodeSmellLifeSpanConnection!
 }
 
 """

@@ -8,7 +8,8 @@
     "watch": "tsc -p . -w",
     "start": "node out/server.js",
     "prettier": "prettier --write '**/*.{ts,json,yml,graphql,md}'",
-    "gen-idl": "get-graphql-schema http://localhost:4040/graphql | prettier --parser graphql > schema/schema.graphql"
+    "gen-idl": "get-graphql-schema http://localhost:4040/graphql | prettier --parser graphql > schema/schema.graphql",
+    "gen-diagrams": "plantuml -tsvg schema/*.plantuml"
   },
   "devDependencies": {
     "@sourcegraph/eslint-config": "^0.3.0",

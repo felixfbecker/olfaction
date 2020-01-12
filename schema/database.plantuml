@@ -13,7 +13,7 @@ entity code_smells {
   *message TEXT
   *commit TEXT
   *lifespan UUID <<FK>>
-  *lifespan_index INTEGER
+  *ordinal INTEGER
   locations JSONB
 }
 

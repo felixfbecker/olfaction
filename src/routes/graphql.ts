@@ -275,7 +275,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
     interface CodeSmellInput {
         lifespan: UUID
-        lifespanIndex: number
+        ordinal: number
         kind: string
         message: string
         locations: Location[]
@@ -288,7 +288,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 description:
                     'A client-provided ID to associate code smell instances in multiple commits as part of the same code smell lifespan',
             },
-            lifespanIndex: {
+            ordinal: {
                 type: GraphQLNonNull(GraphQLInt),
             },
             kind: {
@@ -458,17 +458,17 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return new CodeSmellLifeSpanResolver(lifespan)
         }
         async predecessor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmell.byLifespanIndex.load({
+            const codeSmell = await loaders.codeSmell.byordinal.load({
                 lifespan: this.codeSmell.lifespan,
-                lifespanIndex: this.codeSmell.lifespanIndex - 1,
+                ordinal: this.codeSmell.ordinal - 1,
             })
             return new CodeSmellResolver(codeSmell)
         }
 
         async successor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmell.byLifespanIndex.load({
+            const codeSmell = await loaders.codeSmell.byordinal.load({
                 lifespan: this.codeSmell.lifespan,
-                lifespanIndex: this.codeSmell.lifespanIndex + 1,
+                ordinal: this.codeSmell.ordinal + 1,
             })
             return new CodeSmellResolver(codeSmell)
         }
@@ -602,23 +602,25 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
             return await transaction(db, async () => {
                 return await Promise.all(
-                    codeSmells.map(async ({ kind, message, locations, lifespan, lifespanIndex }) => {
+                    codeSmells.map(async ({ kind, message, locations, lifespan, ordinal }) => {
                         const locationsJson = JSON.stringify(locations)
+                        // Get or create lifespan with ID passed from client
+                        const lifespanResult = await db.query<{ id: UUID }>(sql`
+                            insert into code_smell_lifespans (id, kind, repository)
+                            values (${lifespan}, ${kind}, ${repository})
+                            on conflict on constraint code_smell_lifespans_pkey do nothing
+                            returning id
+                        `)
+                        const lifespanId = lifespanResult.rows[0].id
                         const result = await db.query<CodeSmell>(sql`
-                            with lifespan as (
-                                insert into code_smell_lifespans (id, kind, repository)
-                                values (${lifespan}, ${kind}, ${repository})
-                                on conflict on constraint code_smell_lifespans_pkey do nothing
-                                returning id
-                            )
                             insert into code_smells
-                                        ("commit", "message", locations, lifespan, lifespan_index)
-                            values      (${repository}, ${commit}, ${kind}, ${message}, ${locationsJson}::jsonb, lifespan.id, ${lifespanIndex})
-                            returning   id, "commit", "message", locations, lifespan, lifespan_index
+                                        ("commit", "message", locations, lifespan, ordinal)
+                            values      (${commit}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
+                            returning   id, "commit", "message", locations, lifespan, ordinal
                         `)
                         const codeSmell = result.rows[0]
                         loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
-                        loaders.codeSmell.byLifespanIndex.prime(codeSmell, codeSmell)
+                        loaders.codeSmell.byordinal.prime(codeSmell, codeSmell)
                         return new CodeSmellResolver(codeSmell)
                     })
                 )

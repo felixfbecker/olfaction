@@ -6,7 +6,7 @@ CREATE TABLE code_smells (
     "commit" text,
     locations jsonb,
     lifespan uuid NOT NULL REFERENCES code_smell_lifespans(id),
-    lifespan_index integer NOT NULL
+    ordinal integer NOT NULL
 );
 
 CREATE UNIQUE INDEX code_smells_pkey ON code_smells(id uuid_ops);

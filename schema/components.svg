@@ -16,7 +16,7 @@ link REST to Loaders--><path d="M198,140.16 C198,156.44 198,181.02 198,198.89 " 
 link GraphQL to Loaders--><path d="M113.77,140.16 C131.21,157 157.84,182.72 176.48,200.72 " fill="none" id="GraphQL-&gt;Loaders" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="180.09,204.21,176.4061,195.0761,176.4977,200.7322,170.8416,200.8238,180.09,204.21" style="stroke: #A80036; stroke-width: 1.0;"/><!--MD5=[27876f2d0e959819b28b8718054568fb]
 reverse link Postgres to Loaders--><path d="M131.24,222.5 C141.13,222.5 151.02,222.5 160.91,222.5 " fill="none" id="Postgres&lt;-Loaders" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="126.07,222.5,135.07,226.5,131.07,222.5,135.07,218.5,126.07,222.5" style="stroke: #A80036; stroke-width: 1.0;"/><!--MD5=[1067541d9e3ecc0742dbb5966fc7a521]
 link Loaders to GitDAL--><path d="M199.74,240.66 C201.4,256.94 203.89,281.52 205.7,299.39 " fill="none" id="Loaders-&gt;GitDAL" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="206.24,304.71,209.3193,295.3549,205.7397,299.7351,201.3594,296.1555,206.24,304.71" style="stroke: #A80036; stroke-width: 1.0;"/><!--MD5=[1a40fe4d7d9a3071dc79299ca0581df9]
-link GitDAL to GitRepos--><path d="M215.66,341.16 C222.42,356.27 232.36,378.53 240.14,395.94 " fill="none" id="GitDAL-&gt;GitRepos" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="242.27,400.72,242.2757,390.8711,240.242,396.1498,234.9633,394.116,242.27,400.72" style="stroke: #A80036; stroke-width: 1.0;"/><!--MD5=[eeead92a7dfb22dffb98d0b1469fdbaa]
+link GitDAL to GitRepos--><path d="M215.66,341.16 C222.42,356.27 232.36,378.53 240.14,395.94 " fill="none" id="GitDAL-&gt;GitRepos" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="242.27,400.72,242.2757,390.8711,240.242,396.1498,234.9633,394.116,242.27,400.72" style="stroke: #A80036; stroke-width: 1.0;"/><!--MD5=[8f24023d5e758fc2f56080b7dd74f4f0]
 @startuml
 
 component Server
@@ -43,13 +43,13 @@ GitDAL -down-> GitRepos
 
 @enduml
 
-PlantUML version 1.2019.12(Sun Nov 03 11:24:54 CET 2019)
+PlantUML version 1.2019.13(Tue Dec 10 18:18:29 CET 2019)
 (GPL source distribution)
 Java Runtime: Java(TM) SE Runtime Environment
 JVM: Java HotSpot(TM) 64-Bit Server VM
-Java Version: 11.0.1+13-LTS
+Java Version: 13.0.1+9
 Operating System: Mac OS X
-Default Encoding: ISO8859-1
+Default Encoding: UTF-8
 Language: en
 Country: US
 --></g></svg>

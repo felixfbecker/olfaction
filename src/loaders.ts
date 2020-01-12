@@ -27,7 +27,7 @@ export interface Loaders {
     codeSmell: {
         /** Loads a code smell by ID. */
         byId: DataLoader<CodeSmell['id'], CodeSmell>
-        byLifespanIndex: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>, CodeSmell>
+        byordinal: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>
         /** Loads the entire life span of a given lifespan ID. */
         forLifespan: DataLoader<CodeSmellLifespanSpec & ForwardConnectionArguments, Connection<CodeSmell>>
         forCommit: DataLoader<RepoSpec & CommitSpec & ForwardConnectionArguments, Connection<CodeSmell>>
@@ -96,7 +96,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         codeSmell: {
             byId: new DataLoader<CodeSmell['id'], CodeSmell>(async ids => {
                 const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
-                    select code_smells.*, code_smells.lifespan_index as "lifespanIndex"
+                    select code_smells.*, code_smells.ordinal as "ordinal"
                     from unnest(${ids}::uuid[]) with ordinality as input_id
                     left join code_smells on input_id = code_smells.id
                     order by input_id.ordinality
@@ -106,28 +106,25 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     if (!row.id) {
                         return new UnknownCodeSmellError(spec)
                     }
-                    loaders.codeSmell.byLifespanIndex.prime(row, row)
+                    loaders.codeSmell.byordinal.prime(row, row)
                     return row
                 })
             }),
 
-            byLifespanIndex: new DataLoader<
-                CodeSmellLifespanSpec & Pick<CodeSmell, 'lifespanIndex'>,
-                CodeSmell
-            >(
+            byordinal: new DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>(
                 async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ lifespan, lifespanIndex }, ordinality) => ({
+                        specs.map(({ lifespan, ordinal }, ordinality) => ({
                             ordinality,
                             lifespan,
-                            lifespanIndex,
+                            ordinal,
                         }))
                     )
                     const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
-                        select code_smells.*, code_smells.lifespan_index as "lifespanIndex"
-                        from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "lifespanIndex" int)
+                        select code_smells.*, code_smells.ordinal as "ordinal"
+                        from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "ordinal" int)
                         left join code_smells on code_smells.lifespan = input.lifespan
-                        and code_smells.lifespan_index = input."lifespanIndex"
+                        and code_smells.ordinal = input."ordinal"
                         order by input_id.ordinality
                     `)
                     return result.rows.map((row, i) => {
@@ -139,7 +136,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         return row
                     })
                 },
-                { cacheKeyFn: ({ lifespan, lifespanIndex }) => `${lifespan}#${lifespanIndex}` }
+                { cacheKeyFn: ({ lifespan, ordinal }) => `${lifespan}#${ordinal}` }
             ),
 
             forCommit: new DataLoader<
@@ -161,7 +158,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         select input.ordinality, array_agg(row_to_json(c)) as "codeSmells"
                         from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "commit" text, "repository" text, "first" int, "after" uuid)
                         join lateral (
-                            select code_smells.*, code_smells.lifespan_index as "lifespanIndex", row_to_json(code_smell_lifespans) as "lifespan"
+                            select code_smells.*, code_smells.ordinal as "ordinal", row_to_json(code_smell_lifespans) as "lifespan"
                             from code_smells
                             inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
                             -- required filters:
@@ -189,7 +186,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                                 )
                                 assert.equal(codeSmell.commit, spec.commit, 'Expected commit to equal input')
                                 loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
-                                loaders.codeSmell.byLifespanIndex.prime(codeSmell, codeSmell)
+                                loaders.codeSmell.byordinal.prime(codeSmell, codeSmell)
                                 loaders.codeSmellLifespan.byId.prime(
                                     codeSmell.lifespan.id,
                                     codeSmell.lifespan
@@ -218,10 +215,10 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     const result = await db.query<{
                         instances: CodeSmell[] | [null]
                     }>(sql`
-                        select array_agg(row_to_json(c) order by lifespan_index) as instances
+                        select array_agg(row_to_json(c) order by ordinal) as instances
                         from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "first" int, "after" uuid)
                         join lateral (
-                            select code_smells.*, code_smells.lifespan_index as "lifespanIndex"
+                            select code_smells.*, code_smells.ordinal as "ordinal"
                             from code_smells
                             where input.lifespan = code_smells.lifespan
                             and (input.after is null or code_smells.id >= input.after)

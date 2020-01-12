@@ -39,7 +39,7 @@ class CodeSmell {
   +message: String!
   +commit: Commit!
   +locations: [Location!]!
-  +lifespanIndex: Int!
+  +ordinal: Int!
   {method} +lifespan: CodeSmellLifespan!
 }
 CodeSmell "1..n" --> "0..n" Location

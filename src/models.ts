@@ -41,7 +41,7 @@ export interface CodeSmell {
     message: string
     locations: Location[]
     lifespan: UUID
-    lifespanIndex: number
+    ordinal: number
     commit: SHA
 }
 
