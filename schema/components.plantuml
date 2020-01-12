@@ -1,0 +1,25 @@
+@startuml
+
+component Server
+package "Routes" {
+  component "REST" as REST
+  component "GraphQL" as GraphQL
+  component "Git Upload" as GitUpload
+}
+component Loaders
+component "Git DAL" as GitDAL
+
+database "Git Repositories" as GitRepos
+database "PostgreSQL DB" as Postgres
+
+Server -down-> GraphQL
+Server -down-> GitUpload
+GitUpload -down-> GitRepos
+Server -down-> REST
+REST -down-> Loaders
+GraphQL -down-> Loaders
+Loaders -left-> Postgres
+Loaders -down-> GitDAL
+GitDAL -down-> GitRepos
+
+@enduml
