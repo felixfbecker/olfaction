@@ -1,4 +1,4 @@
-import 'source-map-support'
+import 'source-map-support/register'
 
 import express, { Request, Response, NextFunction } from 'express'
 import { Client } from 'pg'

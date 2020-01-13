@@ -28,6 +28,7 @@ import {
     Commit,
     Signature,
     RepoRootSpec,
+    CodeSmellInput,
 } from '../models'
 import { transaction, mapConnectionNodes } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
@@ -273,13 +274,6 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         nodeType: RepositoryType,
     })
 
-    interface CodeSmellInput {
-        lifespan: UUID
-        ordinal: number
-        kind: string
-        message: string
-        locations: Location[]
-    }
     var CodeSmellInputType = new GraphQLInputObjectType({
         name: 'CodeSmellInput',
         fields: {
@@ -458,7 +452,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return new CodeSmellLifeSpanResolver(lifespan)
         }
         async predecessor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmell.byordinal.load({
+            const codeSmell = await loaders.codeSmell.byOrdinal.load({
                 lifespan: this.codeSmell.lifespan,
                 ordinal: this.codeSmell.ordinal - 1,
             })
@@ -466,7 +460,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async successor({}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmell.byordinal.load({
+            const codeSmell = await loaders.codeSmell.byOrdinal.load({
                 lifespan: this.codeSmell.lifespan,
                 ordinal: this.codeSmell.ordinal + 1,
             })
@@ -611,7 +605,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                             on conflict on constraint code_smell_lifespans_pkey do nothing
                             returning id
                         `)
-                        const lifespanId = lifespanResult.rows[0].id
+                        const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
                         const result = await db.query<CodeSmell>(sql`
                             insert into code_smells
                                         ("commit", "message", locations, lifespan, ordinal)
@@ -620,7 +614,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                         `)
                         const codeSmell = result.rows[0]
                         loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
-                        loaders.codeSmell.byordinal.prime(codeSmell, codeSmell)
+                        loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
                         return new CodeSmellResolver(codeSmell)
                     })
                 )

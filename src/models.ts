@@ -45,6 +45,14 @@ export interface CodeSmell {
     commit: SHA
 }
 
+export interface CodeSmellInput {
+    lifespan: UUID
+    ordinal: number
+    kind: string
+    message: string
+    locations: Location[]
+}
+
 export interface File {
     path: string
 }
