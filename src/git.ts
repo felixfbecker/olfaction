@@ -47,6 +47,9 @@ export async function validateCommit({
     repository: string
     commit: SHA
 }): Promise<void> {
+    if (!/[a-z0-9]{40}/.test(commit) || commit === '0'.repeat(40)) {
+        throw new Error('Invalid commit SHA')
+    }
     const filtered = await filterValidCommits({ repository, commitShas: [commit], repoRoot })
     if (filtered.length === 0) {
         throw new UnknownCommitError({ repository, commit })
@@ -221,6 +224,12 @@ export async function listFiles({
 }
 
 export async function validateRepository({ repository, repoRoot }: { repository: string; repoRoot: string }) {
+    if (!/^[\w-_.]+$/.test(repository)) {
+        throw new Error('Invalid repository name')
+    }
+    if (repository.endsWith('.git')) {
+        throw new Error('Repository names cannot end with .git')
+    }
     try {
         await fs.stat(path.join(repoRoot, repository))
     } catch (err) {
