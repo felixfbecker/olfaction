@@ -27,7 +27,7 @@ export interface Loaders {
     codeSmell: {
         /** Loads a code smell by ID. */
         byId: DataLoader<CodeSmell['id'], CodeSmell>
-        byordinal: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>
+        byOrdinal: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>
         /** Loads the entire life span of a given lifespan ID. */
         forLifespan: DataLoader<CodeSmellLifespanSpec & ForwardConnectionArguments, Connection<CodeSmell>>
         forCommit: DataLoader<RepoSpec & CommitSpec & ForwardConnectionArguments, Connection<CodeSmell>>
@@ -96,7 +96,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         codeSmell: {
             byId: new DataLoader<CodeSmell['id'], CodeSmell>(async ids => {
                 const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
-                    select code_smells.*, code_smells.ordinal as "ordinal"
+                    select code_smells.*
                     from unnest(${ids}::uuid[]) with ordinality as input_id
                     left join code_smells on input_id = code_smells.id
                     order by input_id.ordinality
@@ -106,12 +106,12 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     if (!row.id) {
                         return new UnknownCodeSmellError(spec)
                     }
-                    loaders.codeSmell.byordinal.prime(row, row)
+                    loaders.codeSmell.byOrdinal.prime(row, row)
                     return row
                 })
             }),
 
-            byordinal: new DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>(
+            byOrdinal: new DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>(
                 async specs => {
                     const input = JSON.stringify(
                         specs.map(({ lifespan, ordinal }, ordinality) => ({
@@ -121,7 +121,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         }))
                     )
                     const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
-                        select code_smells.*, code_smells.ordinal as "ordinal"
+                        select code_smells.*
                         from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "ordinal" int)
                         left join code_smells on code_smells.lifespan = input.lifespan
                         and code_smells.ordinal = input."ordinal"
@@ -145,20 +145,20 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             >(
                 async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ repository, commit, first, after }, ordinality) => {
+                        specs.map(({ repository, commit, first, after }, index) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
                                 (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
-                            return { ordinality, repository, commit, first, after: cursor?.value }
+                            return { index, repository, commit, first, after: cursor?.value }
                         })
                     )
                     const result = await db.query<{
                         codeSmells: [null] | (CodeSmell & { lifespan: CodeSmellLifespan })[]
                     }>(sql`
-                        select input.ordinality, array_agg(row_to_json(c)) as "codeSmells"
-                        from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "commit" text, "repository" text, "first" int, "after" uuid)
-                        join lateral (
-                            select code_smells.*, code_smells.ordinal as "ordinal", row_to_json(code_smell_lifespans) as "lifespan"
+                        select input."index", array_agg(row_to_json(c)) as "codeSmells"
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "first" int, "after" uuid)
+                        left join lateral (
+                            select code_smells.*, row_to_json(code_smell_lifespans) as "lifespan"
                             from code_smells
                             inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
                             -- required filters:
@@ -168,8 +168,8 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             order by id asc
                             limit input.first + 1 -- query one more to know whether there is a next page
                         ) c on true
-                        group by input.ordinality
-                        order by input.ordinality
+                        group by input."index"
+                        order by input."index"
                     `)
                     assert.equal(result.rows.length, specs.length, 'Expected length to be the same')
                     return result.rows.map(
@@ -186,7 +186,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                                 )
                                 assert.equal(codeSmell.commit, spec.commit, 'Expected commit to equal input')
                                 loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
-                                loaders.codeSmell.byordinal.prime(codeSmell, codeSmell)
+                                loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
                                 loaders.codeSmellLifespan.byId.prime(
                                     codeSmell.lifespan.id,
                                     codeSmell.lifespan
@@ -205,28 +205,28 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             >(
                 async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ lifespan, first, after }, ordinality) => {
+                        specs.map(({ lifespan, first, after }, index) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
                                 (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
-                            return { lifespan, ordinality, first, after: cursor?.value }
+                            return { lifespan, index, first, after: cursor?.value }
                         })
                     )
                     const result = await db.query<{
                         instances: CodeSmell[] | [null]
                     }>(sql`
-                        select array_agg(row_to_json(c) order by ordinal) as instances
-                        from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "first" int, "after" uuid)
-                        join lateral (
-                            select code_smells.*, code_smells.ordinal as "ordinal"
+                        select array_agg(row_to_json(c) order by c."ordinal") as instances
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "lifespan" uuid, "first" int, "after" uuid)
+                        left join lateral (
+                            select code_smells.*
                             from code_smells
                             where input.lifespan = code_smells.lifespan
                             and (input.after is null or code_smells.id >= input.after)
                             order by id
                             limit input.first + 1
                         ) c on true
-                        group by input.ordinality
-                        order by input.ordinality
+                        group by input."index"
+                        order by input."index"
                     `)
                     return result.rows.map(({ instances }, i) => {
                         const spec = specs[i]
@@ -275,7 +275,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     }>(sql`
                         select array_agg(row_to_json(l)) as "lifespans"
                         from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "kind" text, "first" int, "after" uuid)
-                        join lateral (
+                        left join lateral (
                             select code_smell_lifespans.*
                             from code_smell_lifespans
                             where code_smell_lifespans.repository = input.repository
