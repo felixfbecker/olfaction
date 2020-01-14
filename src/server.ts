@@ -11,9 +11,9 @@ import { AddressInfo } from 'net'
 import { createRestRouter } from './routes/rest'
 
 const repoRoot = path.resolve(process.env.REPO_ROOT || 'repos')
-const port = (process.env.PORT && parseInt(process.env.PORT)) || 4040
+const port = (process.env.PORT && parseInt(process.env.PORT, 10)) || 4040
 
-async function main() {
+async function main(): Promise<void> {
     const app = express()
 
     const db = new Client()
@@ -36,6 +36,7 @@ async function main() {
 
     const server = await new Promise<Server>((resolve, reject) => {
         let server: Server
+        // eslint-disable-next-line prefer-const
         server = app.listen(port, err => (err ? reject(err) : resolve(server)))
     })
 
