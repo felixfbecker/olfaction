@@ -14,12 +14,13 @@ import {
     Commit,
     CodeSmellSpec,
 } from './models'
-import { NullFields, base64encode, parseCursor, isNullArray, asError } from './util'
+import { NullFields, base64encode, parseCursor, isNullArray, asError, logDuration } from './util'
 import assert from 'assert'
 import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
 import { UnknownCodeSmellError, UnknownCommitError, UnknownCodeSmellLifespanError } from './errors'
 import objectHash from 'object-hash'
+import mapPromise from 'p-map'
 
 export type ForwardConnectionArguments = Pick<ConnectionArguments, 'first' | 'after'>
 
@@ -40,8 +41,6 @@ export interface Loaders {
             RepoSpec & { kind?: string } & ForwardConnectionArguments,
             Connection<CodeSmellLifespan>
         >
-        /** Loads the lifespan of any given code smell */
-        forCodeSmell: DataLoader<CodeSmell['id'], CodeSmellLifespan>
     }
 
     commit: {
@@ -58,8 +57,9 @@ export interface Loaders {
     fileContent: DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>
 }
 
-const repoAtCommitCacheKeyFn = ({ repository, commit }: RepoSpec & CommitSpec) => `${repository}@${commit}`
-const connectionArgsKeyFn = ({ first, after }: ForwardConnectionArguments) => `*${after}+${first}`
+const repoAtCommitCacheKeyFn = ({ repository, commit }: RepoSpec & CommitSpec): string =>
+    `${repository}@${commit}`
+const connectionArgsKeyFn = ({ first, after }: ForwardConnectionArguments): string => `*${after}+${first}`
 
 /**
  * Creates a connection from a DB result page that was fetched with one more
@@ -91,7 +91,7 @@ const connectionFromOverfetchedResult = <T extends object>(
     }
 }
 
-export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }) => {
+export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }): Loaders => {
     var loaders: Loaders = {
         codeSmell: {
             byId: new DataLoader<CodeSmell['id'], CodeSmell>(async ids => {
@@ -143,7 +143,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 RepoSpec & CommitSpec & ForwardConnectionArguments,
                 Connection<CodeSmell>
             >(
-                async specs => {
+                logDuration('loaders.codeSmell.forCommit', async specs => {
                     const input = JSON.stringify(
                         specs.map(({ repository, commit, first, after }, index) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
@@ -153,12 +153,12 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         })
                     )
                     const result = await db.query<{
-                        codeSmells: [null] | (CodeSmell & { lifespan: CodeSmellLifespan })[]
+                        codeSmells: [null] | (CodeSmell & { lifespanObject: CodeSmellLifespan })[]
                     }>(sql`
                         select input."index", array_agg(row_to_json(c)) as "codeSmells"
                         from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "first" int, "after" uuid)
                         left join lateral (
-                            select code_smells.*, row_to_json(code_smell_lifespans) as "lifespan"
+                            select code_smells.*, row_to_json(code_smell_lifespans) as "lifespanObject"
                             from code_smells
                             inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
                             -- required filters:
@@ -180,7 +180,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             }
                             for (const codeSmell of codeSmells) {
                                 assert.equal(
-                                    codeSmell.lifespan.repository,
+                                    codeSmell.lifespanObject.repository,
                                     spec.repository,
                                     'Expected repository to equal input spec'
                                 )
@@ -188,14 +188,14 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                                 loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
                                 loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
                                 loaders.codeSmellLifespan.byId.prime(
-                                    codeSmell.lifespan.id,
-                                    codeSmell.lifespan
+                                    codeSmell.lifespan,
+                                    codeSmell.lifespanObject
                                 )
                             }
                             return connectionFromOverfetchedResult(codeSmells, spec, 'id')
                         }
                     )
-                },
+                }),
                 { cacheKeyFn: args => repoAtCommitCacheKeyFn(args) + connectionArgsKeyFn(args) }
             ),
 
@@ -244,21 +244,23 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         },
 
         codeSmellLifespan: {
-            byId: new DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>(async ids => {
-                const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
-                    select *
-                    from unnest(${ids}::uuid[]) with ordinality as input_id
-                    left join code_smells_lifespans on input_id = code_smell_lifespans.id
-                    order by input_id.ordinality
-                `)
-                return result.rows.map((row, i) => {
-                    const spec: CodeSmellLifespanSpec = { lifespan: ids[i] }
-                    if (!row.id) {
-                        return new UnknownCodeSmellLifespanError(spec)
-                    }
-                    return row
+            byId: new DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>(
+                logDuration('loaders.codeSmellLifespan.byId', async ids => {
+                    const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
+                        select *
+                        from unnest(${ids}::uuid[]) with ordinality as input_id
+                        left join code_smells_lifespans on input_id = code_smell_lifespans.id
+                        order by input_id.ordinality
+                    `)
+                    return result.rows.map((row, i) => {
+                        const spec: CodeSmellLifespanSpec = { lifespan: ids[i] }
+                        if (!row.id) {
+                            return new UnknownCodeSmellLifespanError(spec)
+                        }
+                        return row
+                    })
                 })
-            }),
+            ),
 
             forRepository: new DataLoader(
                 async specs => {
@@ -304,48 +306,27 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         args.repository + (args.kind ? '?kind=' + args.kind : '') + connectionArgsKeyFn(args),
                 }
             ),
-
-            forCodeSmell: new DataLoader<CodeSmell['id'], CodeSmellLifespan>(async codeSmellIds => {
-                const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
-                    select code_smell_lifespans.*
-                    from unnest(${codeSmellIds}::uuid[]) with ordinality as input
-                    left join code_smells
-                    on input.input = code_smells.id
-                    left join code_smell_lifespans
-                    on code_smells.lifespan = code_smell_lifespans.id
-                    order by input.ordinality
-                `)
-                assert.strictEqual(result.rows.length, codeSmellIds.length)
-                return result.rows.map((row, i) => {
-                    const spec: CodeSmellSpec = { codeSmell: codeSmellIds[i] }
-                    if (!row.id) {
-                        return new UnknownCodeSmellError(spec)
-                    }
-                    loaders.codeSmellLifespan.byId.prime(row.id, row)
-                    return row
-                })
-            }),
         },
 
         files: new DataLoader<RepoSpec & CommitSpec, File[]>(
-            async commits => {
-                return await Promise.all(
-                    commits.map(({ repository, commit }) =>
-                        git.listFiles({ repository, commit, repoRoot }).catch(err => asError(err))
-                    )
+            logDuration('loaders.files', commits =>
+                mapPromise(
+                    commits,
+                    ({ repository, commit }) =>
+                        git.listFiles({ repository, commit, repoRoot }).catch(err => asError(err)),
+                    { concurrency: 100 }
                 )
-            },
+            ),
             { cacheKeyFn: repoAtCommitCacheKeyFn }
         ),
 
         fileContent: new DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>(
-            async specs => {
-                return await Promise.all(
+            specs =>
+                Promise.all(
                     specs.map(({ repository, commit, file }) =>
                         git.getFileContent({ repository, commit, repoRoot, file }).catch(err => asError(err))
                     )
-                )
-            },
+                ),
             {
                 cacheKeyFn: ({ file, ...spec }: RepoSpec & CommitSpec & FileSpec) =>
                     repoAtCommitCacheKeyFn(spec) + `#${file}`,
@@ -389,8 +370,8 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             ),
 
             forRepository: new DataLoader(
-                async specs => {
-                    return Promise.all(
+                logDuration('loaders.commit.forRepository', async specs =>
+                    Promise.all(
                         specs.map(async ({ repository, first, after, grep }) => {
                             try {
                                 const cursor =
@@ -412,7 +393,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             }
                         })
                     )
-                },
+                ),
                 { cacheKeyFn: objectHash }
             ),
         },
