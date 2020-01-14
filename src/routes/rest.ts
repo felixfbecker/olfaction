@@ -84,7 +84,7 @@ export const createRestRouter = ({
                     variableValues: {
                         repository,
                         kind,
-                        first: (first && parseInt(first)) || 50,
+                        first: (first && parseInt(first, 10)) || 50,
                         after,
                     },
                 })
@@ -106,7 +106,7 @@ export const createRestRouter = ({
 
     router.get<{ repository: string; commit: string }>(
         '/repositories/:repository/commits/:commit/code-smells',
-        wrap(async (req, res) => {
+        wrap((req, res) => {
             const { repository, commit } = req.params
         })
     )
