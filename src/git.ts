@@ -5,7 +5,6 @@ import { AbortError } from './abort'
 import { RepoSpec, CommitSpec, SHA, FileSpec, RepoRootSpec, CodeSmell, File, Commit } from './models'
 import { UnknownRepositoryError, UnknownCommitError } from './errors'
 import { take, filter } from 'ix/asynciterable/pipe/index'
-import execa from 'execa'
 import { sortBy } from 'lodash'
 import { fromNodeStream } from 'ix'
 import { AsyncIterableX } from 'ix/asynciterable'
@@ -169,7 +168,7 @@ export async function getFileContents({
 }): Promise<(string | null)[]> {
     const fileStrings = files.map(f => `${f.commit}:${f.file}`)
     try {
-        const { stdout } = await exec('git', ['cat-file', '--batch', `--format=>>>%(rest)`], {
+        const { stdout } = await exec('git', ['cat-file', '--batch', '--format=>>>%(rest)'], {
             cwd: path.join(repoRoot, repository),
             input: fileStrings.map(f => `${f} ${f}`).join('\n'),
         })
@@ -240,8 +239,8 @@ export async function validateRepository({ repository, repoRoot }: { repository:
     }
 }
 
-export async function listRepositories({ repoRoot }: RepoRootSpec): Promise<string[]> {
-    return await fs.readdir(repoRoot)
+export function listRepositories({ repoRoot }: RepoRootSpec): Promise<string[]> {
+    return fs.readdir(repoRoot)
 }
 
 export const log = ({
@@ -295,7 +294,7 @@ export async function sortTopologically(
     // Sort code smells by commit order
     const commitIds = new Set(codeSmells.map(codeSmell => codeSmell.commit))
     const sortedCommitIds = fromNodeStream(
-        execa('git', ['rev-list', '--topo-order', ...commitIds], { cwd: path.join(repository, repoRoot) })
+        exec('git', ['rev-list', '--topo-order', ...commitIds], { cwd: path.join(repository, repoRoot) })
             .stdout!
     ).pipe(
         split('\n'),
