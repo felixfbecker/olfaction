@@ -155,10 +155,10 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     const result = await db.query<{
                         codeSmells: [null] | (CodeSmell & { lifespanObject: CodeSmellLifespan })[]
                     }>(sql`
-                        select input."index", array_agg(row_to_json(c)) as "codeSmells"
+                        select input."index", array_agg(to_jsonb(c)) as "codeSmells"
                         from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "first" int, "after" uuid)
                         left join lateral (
-                            select code_smells.*, row_to_json(code_smell_lifespans) as "lifespanObject"
+                            select code_smells.*, to_jsonb(code_smell_lifespans) as "lifespanObject"
                             from code_smells
                             inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
                             -- required filters:
@@ -215,7 +215,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     const result = await db.query<{
                         instances: CodeSmell[] | [null]
                     }>(sql`
-                        select array_agg(row_to_json(c) order by c."ordinal") as instances
+                        select array_agg(to_jsonb(c) order by c."ordinal") as instances
                         from jsonb_to_recordset(${input}::jsonb) as input("index" int, "lifespan" uuid, "first" int, "after" uuid)
                         left join lateral (
                             select code_smells.*
@@ -275,7 +275,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     const result = await db.query<{
                         lifespans: [null] | CodeSmellLifespan[]
                     }>(sql`
-                        select array_agg(row_to_json(l)) as "lifespans"
+                        select array_agg(to_jsonb(l)) as "lifespans"
                         from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "kind" text, "first" int, "after" uuid)
                         left join lateral (
                             select code_smell_lifespans.*
