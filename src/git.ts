@@ -281,9 +281,9 @@ export async function init({
 }): Promise<void> {
     const repo = path.resolve(repoRoot, repository)
     await fs.mkdir(repo)
-    await exec('git', ['init', '--bare'])
+    await exec('git', ['init', '--bare'], { cwd: repo })
     // Allow git push
-    await exec('git', ['config', '--bool', 'http.receivepack', 'true'])
+    await exec('git', ['config', '--bool', 'http.receivepack', 'true'], { cwd: repo })
 }
 
 export async function sortTopologically(

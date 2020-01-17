@@ -19,13 +19,12 @@ export const createRepoUploadRouter = ({ repoRoot }: RepoRootSpec): Router => {
 
     const handleGitReq = cgi('git', {
         args: ['http-backend'],
-        mountPoint: '/git',
         env: gitCGIEnv,
         stderr: process.stderr,
     })
 
-    router.use<{ repository: string }>(
-        '/:repository',
+    router.all<{ repository: string }>(
+        '/:repository/*',
         wrap(async (req, res, next) => {
             const repository = req.params.repository
             try {

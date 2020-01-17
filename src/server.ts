@@ -10,7 +10,7 @@ import { Server } from 'http'
 import { AddressInfo } from 'net'
 import { createRestRouter } from './routes/rest'
 
-const repoRoot = path.resolve(process.env.REPO_ROOT || 'repos')
+const repoRoot = path.resolve(process.env.REPO_ROOT || path.resolve(process.cwd(), 'repos'))
 const port = (process.env.PORT && parseInt(process.env.PORT, 10)) || 4040
 
 async function main(): Promise<void> {
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
     const db = new Client()
     await db.connect()
 
-    app.use(morgan('dev', { immediate: true }))
+    app.use(morgan('dev', { immediate: false }))
 
     app.use('/git', createRepoUploadRouter({ repoRoot }))
 
