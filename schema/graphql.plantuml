@@ -50,11 +50,13 @@ class Location {
   +contents(encoding: String): String!
 }
 Location --> Range
+Location --> Range
 Location --> File
 class Range {
   +start: Position!
   +end: Position!
 }
+Range --> Position
 Range --> Position
 class Position {
   +line: Int!
