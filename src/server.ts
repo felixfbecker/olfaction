@@ -16,6 +16,8 @@ const port = (process.env.PORT && parseInt(process.env.PORT, 10)) || 4040
 async function main(): Promise<void> {
     const app = express()
 
+    app.set('etag', true)
+
     const db = new Client()
     await db.connect()
 
