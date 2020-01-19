@@ -6,7 +6,7 @@ class Query {
   {method} +repository(name: String!): Repository
   {method} +repositories: Connection<Repository>!
   {method} +codeSmell(id: ID!): CodeSmell
-  {method} +codeSmellLifeSpan(id: ID!): CodeSmellLifeSpan
+  {method} +codeSmellLifespan(id: ID!): CodeSmellLifespan
 }
 Query -- Repository
 Query -- CodeSmell

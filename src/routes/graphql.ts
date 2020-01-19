@@ -346,8 +346,8 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             locations: {
                 type: GraphQLList(GraphQLNonNull(LocationType)),
             },
-            lifeSpan: {
-                type: GraphQLNonNull(CodeSmellLifeSpanType),
+            lifespan: {
+                type: GraphQLNonNull(CodeSmellLifespanType),
                 description: 'The complete lifespan of this code smell throughout commit history.',
             },
             predecessor: {
@@ -368,8 +368,8 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     })
     var { connectionType: CodeSmellConnectionType } = connectionDefinitions({ nodeType: CodeSmellType })
 
-    var CodeSmellLifeSpanType = new GraphQLObjectType({
-        name: 'CodeSmellLifeSpan',
+    var CodeSmellLifespanType = new GraphQLObjectType({
+        name: 'CodeSmellLifespan',
         description: 'A lifespan of a code smell throughout commit history.',
         fields: {
             id: {
@@ -395,7 +395,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     })
 
     var { connectionType: CodeSmellLifespanConnectionType } = connectionDefinitions({
-        nodeType: CodeSmellLifeSpanType,
+        nodeType: CodeSmellLifespanType,
     })
 
     var RepositoryType = new GraphQLObjectType({
@@ -492,8 +492,8 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                         },
                     },
                 },
-                codeSmellLifeSpan: {
-                    type: CodeSmellLifeSpanType,
+                codeSmellLifespan: {
+                    type: CodeSmellLifespanType,
                     args: {
                         id: {
                             type: GraphQLNonNull(GraphQLID),
@@ -565,17 +565,17 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         async codeSmellLifespans(
             { kind, ...args }: KindFilter & ForwardConnectionArguments,
             { loaders }: Context
-        ): Promise<Connection<CodeSmellLifeSpanResolver>> {
+        ): Promise<Connection<CodeSmellLifespanResolver>> {
             const connection = await loaders.codeSmellLifespan.forRepository.load({
                 ...args,
                 repository: this.name,
                 kind,
             })
-            return mapConnectionNodes(connection, node => new CodeSmellLifeSpanResolver(node))
+            return mapConnectionNodes(connection, node => new CodeSmellLifespanResolver(node))
         }
     }
 
-    class CodeSmellLifeSpanResolver {
+    class CodeSmellLifespanResolver {
         constructor(private lifespan: CodeSmellLifespan) {}
 
         get id(): UUID {
@@ -637,9 +637,9 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         get message(): string {
             return this.codeSmell.message
         }
-        async lifeSpan(args: {}, { loaders }: Context) {
+        async lifespan(args: {}, { loaders }: Context) {
             const lifespan = (await loaders.codeSmellLifespan.byId.load(this.codeSmell.lifespan))!
-            return new CodeSmellLifeSpanResolver(lifespan)
+            return new CodeSmellLifespanResolver(lifespan)
         }
         async predecessor(args: {}, { loaders }: Context): Promise<CodeSmellResolver | null> {
             try {
@@ -824,9 +824,9 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             const codeSmell = await loaders.codeSmell.byId.load(id)
             return new CodeSmellResolver(codeSmell)
         },
-        async codeSmellLifeSpan({ id }: { id: UUID }, { loaders }: Context) {
+        async codeSmellLifespan({ id }: { id: UUID }, { loaders }: Context) {
             const lifespan = await loaders.codeSmellLifespan.byId.load(id)
-            return new CodeSmellLifeSpanResolver(lifespan)
+            return new CodeSmellLifespanResolver(lifespan)
         },
     }
 

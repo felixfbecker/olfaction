@@ -216,7 +216,7 @@ export const createRestRouter = ({
                 query($id: ID!) {
                     codeSmell(id: $id) {
                         id
-                        lifeSpan {
+                        lifespan {
                             id
                             kind
                         }
@@ -302,9 +302,9 @@ export const createRestRouter = ({
             )
 
             const connection: Connection<unknown> = data.repository.codeSmellLifespans
-            const lifeSpans = connection.edges.map(edge => edge.node)
+            const lifespans = connection.edges.map(edge => edge.node)
             addLinkHeaderForConnection(req, res, connection)
-            res.json(lifeSpans)
+            res.json(lifespans)
         })
     )
 
@@ -321,7 +321,7 @@ export const createRestRouter = ({
                                 edges {
                                     node {
                                         id
-                                        lifeSpan {
+                                        lifespan {
                                             id
                                             kind
                                         }
@@ -386,7 +386,7 @@ export const createRestRouter = ({
             const { id } = req.params
             const query = gql`
                 query($id: ID!) {
-                    codeSmellLifeSpan(id: $id) {
+                    codeSmellLifespan(id: $id) {
                         id
                         kind
                         interval
@@ -405,7 +405,7 @@ export const createRestRouter = ({
                     },
                 })
             )
-            res.json(data.codeSmellLifeSpan)
+            res.json(data.codeSmellLifespan)
         })
     )
 
@@ -416,12 +416,12 @@ export const createRestRouter = ({
             const { id } = req.params
             const query = gql`
                 query($id: ID!, $after: String, $first: Int) {
-                    codeSmellLifeSpan(id: $id) {
+                    codeSmellLifespan(id: $id) {
                         instances(first: $first, after: $after) {
                             edges {
                                 node {
                                     id
-                                    lifeSpan {
+                                    lifespan {
                                         id
                                         kind
                                     }
@@ -470,7 +470,7 @@ export const createRestRouter = ({
                     },
                 })
             )
-            const connection: Connection<unknown> = data.codeSmellLifeSpan.instances
+            const connection: Connection<unknown> = data.codeSmellLifespan.instances
             addLinkHeaderForConnection(req, res, connection)
             const codeSmells = connection.edges.map(edge => edge.node)
             res.json(codeSmells)

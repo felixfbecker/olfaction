@@ -10,7 +10,7 @@ type CodeSmell {
   """
   The complete lifespan of this code smell throughout commit history.
   """
-  lifeSpan: CodeSmellLifeSpan!
+  lifespan: CodeSmellLifespan!
 
   """
   This code smell in a previous commit. This may not be in the direct parent
@@ -88,7 +88,7 @@ input CodeSmellInput {
 """
 A lifespan of a code smell throughout commit history.
 """
-type CodeSmellLifeSpan {
+type CodeSmellLifespan {
   id: ID!
 
   """
@@ -115,7 +115,7 @@ type CodeSmellLifeSpan {
 """
 A connection to a list of items.
 """
-type CodeSmellLifeSpanConnection {
+type CodeSmellLifespanConnection {
   """
   Information to aid in pagination.
   """
@@ -124,17 +124,17 @@ type CodeSmellLifeSpanConnection {
   """
   A list of edges.
   """
-  edges: [CodeSmellLifeSpanEdge]
+  edges: [CodeSmellLifespanEdge]
 }
 
 """
 An edge in a connection.
 """
-type CodeSmellLifeSpanEdge {
+type CodeSmellLifespanEdge {
   """
   The item at the end of the edge
   """
-  node: CodeSmellLifeSpan
+  node: CodeSmellLifespan
 
   """
   A cursor for use in pagination
@@ -469,12 +469,12 @@ type Query {
     """
     id: ID!
   ): CodeSmell
-  codeSmellLifeSpan(
+  codeSmellLifespan(
     """
     The ID of the code smell lifespan to query.
     """
     id: ID!
-  ): CodeSmellLifeSpan
+  ): CodeSmellLifespan
   repository(
     """
     The name under which the repository was uploaded.
@@ -545,7 +545,7 @@ type Repository {
     Only return code smells with this kind.
     """
     kind: String
-  ): CodeSmellLifeSpanConnection!
+  ): CodeSmellLifespanConnection!
 }
 
 """

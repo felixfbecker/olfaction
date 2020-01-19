@@ -66,7 +66,7 @@ $body = (@{
                                     codeSmells {
                                         edges {
                                             node {
-                                                lifeSpan {
+                                                lifespan {
                                                     kind
                                                 }
                                                 locations {
