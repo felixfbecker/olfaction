@@ -52,7 +52,7 @@ export interface Loaders {
 
         /** Loads the existing commit SHAs in a repository */
         forRepository: DataLoader<
-            RepoSpec & ForwardConnectionArguments & { grep?: string },
+            RepoSpec & ForwardConnectionArguments & { grep?: string; revisionRange?: string },
             Connection<Commit>
         >
     }
@@ -438,12 +438,12 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             forRepository: new DataLoader(
                 logDuration('loaders.commit.forRepository', async specs =>
                     Promise.all(
-                        specs.map(async ({ repository, first, after, grep }) => {
+                        specs.map(async ({ repository, first, after, grep, revisionRange }) => {
                             try {
                                 const cursor =
                                     (after && parseCursor<Commit>(after, new Set(['oid']))) || undefined
                                 const commits = await git
-                                    .log({ repository, commit: cursor?.value, grep, repoRoot })
+                                    .log({ repository, commit: cursor?.value, grep, revisionRange, repoRoot })
                                     .tap((commit: Commit) =>
                                         loaders.commit.bySha.prime({ repository, commit: commit.oid }, commit)
                                     )

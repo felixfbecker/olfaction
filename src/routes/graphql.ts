@@ -401,6 +401,15 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                             'Limit the commits to ones with log message that matches the specified pattern (regular expression).' +
                             "The pattern supports Git's extended regular expression syntax.",
                     },
+                    revisionRange: {
+                        type: GraphQLString,
+                        defaultValue: 'HEAD',
+                        description:
+                            'Show only commits in the specified revision range. ' +
+                            'When not specified, it defaults to `HEAD` (i.e. the whole history leading to the current commit). ' +
+                            '`origin..HEAD` specifies all the commits reachable from the current commit (i.e. `HEAD`), but not from `origin`. ' +
+                            'See https://git-scm.com/docs/gitrevisions#_specifying_revisions',
+                    },
                 },
                 type: GraphQLNonNull(CommitConnectionType),
             },
@@ -511,7 +520,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         constructor(public name: string) {}
 
         async commits(
-            args: ForwardConnectionArguments & { grep?: string },
+            args: ForwardConnectionArguments & { grep?: string; revisionRange?: string },
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
             const connection = await loaders.commit.forRepository.load({

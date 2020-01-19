@@ -196,7 +196,7 @@ type CombinedFileDifferenceEdge {
 A git commit object.
 """
 type Commit {
-  oid: String!
+  oid: GitObjectID!
   message: String!
   subject: String!
   author: Signature!
@@ -260,7 +260,6 @@ type File {
     """
     encoding: String
   ): String
-  linesCount: Int
 
   """
   The commit this file exists at.
@@ -271,6 +270,11 @@ type File {
   The code smells that exist in this file.
   """
   codeSmells(after: String, first: Int): CodeSmellConnection!
+
+  """
+  The amount of lines in this file.
+  """
+  lineCounts: LineCounts!
 }
 
 enum FileChangeKind {
@@ -310,6 +314,58 @@ type FileEdge {
   A cursor for use in pagination
   """
   cursor: String!
+}
+
+"""
+A 40-character Git object ID.
+"""
+scalar GitObjectID
+
+type LineCounts {
+  """
+  Physical lines
+  """
+  total: Int!
+
+  """
+  Lines of code (source)
+  """
+  source: Int
+
+  """
+  Lines with comments
+  """
+  comment: Int
+
+  """
+  Lines with single-line comments
+  """
+  single: Int
+
+  """
+  Lines with block comments
+  """
+  block: Int
+
+  """
+  Lines mixed up with source and comments
+  """
+  mixed: Int
+
+  """
+  Empty lines within block comments
+  """
+  blockEmpty: Int
+
+  """
+  Empty lines
+  """
+  empty: Int
+
+  """
+  Lines with TODOs
+  """
+  todo: Int
 }
 
 type Location {
@@ -440,8 +496,17 @@ type Repository {
     expression syntax.
     """
     grep: String
+
+    """
+    Show only commits in the specified revision range. When not specified, it
+    defaults to `HEAD` (i.e. the whole history leading to the current commit).
+    `origin..HEAD` specifies all the commits reachable from the current commit
+    (i.e. `HEAD`), but not from `origin`. See
+    https://git-scm.com/docs/gitrevisions#_specifying_revisions
+    """
+    revisionRange: String = "HEAD"
   ): CommitConnection!
-  commit(oid: String!): Commit
+  commit(oid: GitObjectID!): Commit
   codeSmellLifespans(after: String, first: Int, kind: String): CodeSmellLifeSpanConnection!
 }
 

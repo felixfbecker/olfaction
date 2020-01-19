@@ -344,9 +344,9 @@ export function listRepositories({ repoRoot }: RepoRootSpec): Promise<string[]> 
 export const log = ({
     repoRoot,
     repository,
-    commit = 'HEAD',
+    revisionRange = 'HEAD',
     grep,
-}: RepoRootSpec & RepoSpec & Partial<CommitSpec> & { grep?: string }): AsyncIterableX<Commit> => {
+}: RepoRootSpec & RepoSpec & { grep?: string; revisionRange?: string }): AsyncIterableX<Commit> => {
     const gitProcess = exec(
         'git',
         [
@@ -354,7 +354,7 @@ export const log = ({
             '-z',
             `--format=${commitFormat}`,
             ...(grep ? [`--grep=${grep}`, '--extended-regexp', '--regexp-ignore-case'] : []),
-            commit,
+            revisionRange,
             '--',
         ],
         { cwd: path.join(repoRoot, repository) }
