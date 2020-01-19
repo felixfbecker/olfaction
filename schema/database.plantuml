@@ -1,4 +1,4 @@
-@startuml Database
+@startuml database
 hide circle
 hide empty members
 

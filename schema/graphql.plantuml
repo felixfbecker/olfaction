@@ -1,4 +1,4 @@
-@startuml GraphQL
+@startuml graphql
 hide circle
 hide empty members
 
