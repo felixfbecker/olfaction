@@ -29,7 +29,7 @@ export type ForwardConnectionArguments = Pick<ConnectionArguments, 'first' | 'af
 /** Optional filter for the kind of a code smell. */
 export interface KindFilter {
     /** Optional filter for the kind of a code smell. */
-    kind?: string
+    kind: string | null
 }
 
 export interface Loaders {
@@ -154,18 +154,14 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
             byOrdinal: new DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>(
                 async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ lifespan, ordinal }, ordinality) => ({
-                            ordinality,
-                            lifespan,
-                            ordinal,
-                        }))
+                        specs.map(({ lifespan, ordinal }, index) => ({ index, lifespan, ordinal }))
                     )
                     const result = await dbPool.query<CodeSmell | NullFields<CodeSmell>>(sql`
                         select code_smells.*
-                        from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "ordinal" int)
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "lifespan" uuid, "ordinal" int)
                         left join code_smells on code_smells.lifespan = input.lifespan
                         and code_smells.ordinal = input."ordinal"
-                        order by input_id.ordinality
+                        order by input."index"
                     `)
                     return result.rows.map((row, i) => {
                         const spec = specs[i]
@@ -305,7 +301,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                     const result = await dbPool.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
                         select *
                         from unnest(${ids}::uuid[]) with ordinality as input_id
-                        left join code_smells_lifespans on input_id = code_smell_lifespans.id
+                        left join code_smell_lifespans on input_id = code_smell_lifespans.id
                         order by input_id.ordinality
                     `)
                     return result.rows.map((row, i) => {

@@ -90,6 +90,10 @@ A lifespan of a code smell throughout commit history.
 """
 type CodeSmellLifeSpan {
   id: ID!
+
+  """
+  Only return code smells with this kind.
+  """
   kind: String
 
   """
@@ -215,7 +219,14 @@ type Commit {
   The files that existed at this commit in the repository
   """
   files(after: String, first: Int): FileConnection!
-  codeSmells(after: String, first: Int): CodeSmellConnection!
+  codeSmells(
+    """
+    Only return code smells with this kind.
+    """
+    kind: String
+    after: String
+    first: Int
+  ): CodeSmellConnection!
 }
 
 """
@@ -269,7 +280,14 @@ type File {
   """
   The code smells that exist in this file.
   """
-  codeSmells(after: String, first: Int): CodeSmellConnection!
+  codeSmells(
+    """
+    Only return code smells with this kind.
+    """
+    kind: String
+    after: String
+    first: Int
+  ): CodeSmellConnection!
 
   """
   The amount of lines in this file.
@@ -451,6 +469,12 @@ type Query {
     """
     id: ID!
   ): CodeSmell
+  codeSmellLifeSpan(
+    """
+    The ID of the code smell lifespan to query.
+    """
+    id: ID!
+  ): CodeSmellLifeSpan
   repository(
     """
     The name under which the repository was uploaded.
@@ -500,7 +524,7 @@ type Repository {
     """
     The revision to start at (e.g. a commit, a branch, a tag, etc).
     """
-    revision: String = "HEAD"
+    startRevision: String = "HEAD"
 
     """
     Show commits more recent than a specific date.
@@ -513,7 +537,15 @@ type Repository {
     until: String
   ): CommitConnection!
   commit(oid: GitObjectID!): Commit
-  codeSmellLifespans(after: String, first: Int, kind: String): CodeSmellLifeSpanConnection!
+  codeSmellLifespans(
+    after: String
+    first: Int
+
+    """
+    Only return code smells with this kind.
+    """
+    kind: String
+  ): CodeSmellLifeSpanConnection!
 }
 
 """

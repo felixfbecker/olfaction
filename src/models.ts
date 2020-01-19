@@ -80,7 +80,7 @@ export interface CodeSmellInput {
     lifespan: UUID
     ordinal: number
     kind: string
-    message: string
+    message: string | null
     locations: Location[]
 }
 

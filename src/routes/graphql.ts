@@ -42,6 +42,12 @@ import { connectionDefinitions, forwardConnectionArgs, Connection, connectionFro
 import { last, identity } from 'lodash'
 import sloc from 'sloc'
 import * as path from 'path'
+import { UnknownCodeSmellError } from '../errors'
+
+type GraphQLArg<T> = T extends undefined ? Exclude<T, undefined> | null : T
+type GraphQLArgs<T> = {
+    [K in keyof T]: GraphQLArg<T[K]>
+}
 
 interface Context {
     loaders: Loaders
@@ -405,7 +411,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                             'Limit the commits to ones with log message that matches the specified pattern (regular expression).' +
                             "The pattern supports Git's extended regular expression syntax.",
                     },
-                    revision: {
+                    startRevision: {
                         type: GraphQLString,
                         defaultValue: 'HEAD',
                         description: 'The revision to start at (e.g. a commit, a branch, a tag, etc).',
@@ -486,6 +492,15 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                         },
                     },
                 },
+                codeSmellLifeSpan: {
+                    type: CodeSmellLifeSpanType,
+                    args: {
+                        id: {
+                            type: GraphQLNonNull(GraphQLID),
+                            description: 'The ID of the code smell lifespan to query.',
+                        },
+                    },
+                },
                 repository: {
                     type: RepositoryType,
                     args: {
@@ -526,11 +541,15 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         constructor(public name: string) {}
 
         async commits(
-            args: ForwardConnectionArguments & GitLogFilters,
+            args: ForwardConnectionArguments & GraphQLArgs<GitLogFilters>,
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
             const connection = await loaders.commit.forRepository.load({
                 ...args,
+                messagePattern: args.messagePattern || undefined,
+                startRevision: args.startRevision || undefined,
+                since: args.since || undefined,
+                until: args.until || undefined,
                 repository: this.name,
             })
             return mapConnectionNodes(connection, node =>
@@ -550,7 +569,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             const connection = await loaders.codeSmellLifespan.forRepository.load({
                 ...args,
                 repository: this.name,
-                kind: kind || undefined,
+                kind,
             })
             return mapConnectionNodes(connection, node => new CodeSmellLifeSpanResolver(node))
         }
@@ -623,19 +642,33 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             return new CodeSmellLifeSpanResolver(lifespan)
         }
         async predecessor(args: {}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmell.byOrdinal.load({
-                lifespan: this.codeSmell.lifespan,
-                ordinal: this.codeSmell.ordinal - 1,
-            })
-            return new CodeSmellResolver(codeSmell)
+            try {
+                const codeSmell = await loaders.codeSmell.byOrdinal.load({
+                    lifespan: this.codeSmell.lifespan,
+                    ordinal: this.codeSmell.ordinal - 1,
+                })
+                return new CodeSmellResolver(codeSmell)
+            } catch (err) {
+                if (err instanceof UnknownCodeSmellError) {
+                    return null
+                }
+                throw err
+            }
         }
 
         async successor(args: {}, { loaders }: Context): Promise<CodeSmellResolver | null> {
-            const codeSmell = await loaders.codeSmell.byOrdinal.load({
-                lifespan: this.codeSmell.lifespan,
-                ordinal: this.codeSmell.ordinal + 1,
-            })
-            return new CodeSmellResolver(codeSmell)
+            try {
+                const codeSmell = await loaders.codeSmell.byOrdinal.load({
+                    lifespan: this.codeSmell.lifespan,
+                    ordinal: this.codeSmell.ordinal + 1,
+                })
+                return new CodeSmellResolver(codeSmell)
+            } catch (err) {
+                if (err instanceof UnknownCodeSmellError) {
+                    return null
+                }
+                throw err
+            }
         }
 
         async commit(args: {}, { loaders }: Context): Promise<CommitResolver> {
@@ -734,7 +767,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     type CommitResolver = ReturnType<typeof createCommitResolver>
 
     interface EncodingArgs {
-        encoding: string
+        encoding: string | null
     }
 
     class FileResolver {
@@ -791,6 +824,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             const codeSmell = await loaders.codeSmell.byId.load(id)
             return new CodeSmellResolver(codeSmell)
         },
+        async codeSmellLifeSpan({ id }: { id: UUID }, { loaders }: Context) {
+            const lifespan = await loaders.codeSmellLifespan.byId.load(id)
+            return new CodeSmellLifeSpanResolver(lifespan)
+        },
     }
 
     const mutation = {
@@ -813,6 +850,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 transaction(db, () =>
                     Promise.all(
                         codeSmells.map(async ({ kind, message, locations, lifespan, ordinal }) => {
+                            message = message?.trim() || null
                             for (const location of locations) {
                                 if (path.posix.isAbsolute(location.file)) {
                                     throw new Error(

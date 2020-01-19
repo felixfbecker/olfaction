@@ -339,8 +339,9 @@ export async function validateRepository({ repository, repoRoot }: { repository:
     }
 }
 
-export function listRepositories({ repoRoot }: RepoRootSpec): Promise<string[]> {
-    return fs.readdir(repoRoot)
+export async function listRepositories({ repoRoot }: RepoRootSpec): Promise<string[]> {
+    const directories = await fs.readdir(repoRoot)
+    return directories.map(dir => dir.replace(/\.git$/, ''))
 }
 
 export interface GitLogFilters {

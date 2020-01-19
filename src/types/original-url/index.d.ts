@@ -1,5 +1,9 @@
 declare module 'original-url' {
     import { IncomingMessage } from 'http'
-    function originalUrl(req: IncomingMessage): string
+    import { Url } from 'url'
+    interface OriginalUrl extends Url {
+        full: string
+    }
+    function originalUrl(req: IncomingMessage): OriginalUrl
     export = originalUrl
 }

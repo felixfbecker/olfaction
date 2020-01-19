@@ -18,7 +18,7 @@ export class UnknownCodeSmellError extends Error {
         if ('codeSmell' in spec) {
             super(`Could not find code smell with id ${spec.codeSmell}`)
         } else {
-            super(`Could not find code smell with lifespan ID ${spec.lifespan} and index ${spec.ordinal}`)
+            super(`Could not find code smell in lifespan '${spec.lifespan}' at ordinal ${spec.ordinal}`)
         }
         this.name = 'UnknownCodeSmellError'
         this.status = HttpStatus.NOT_FOUND

@@ -5,8 +5,12 @@ hide empty members
 class Query {
   {method} +repository(name: String!): Repository
   {method} +repositories: Connection<Repository>!
+  {method} +codeSmell(id: ID!): CodeSmell
+  {method} +codeSmellLifeSpan(id: ID!): CodeSmellLifeSpan
 }
-Query --> Repository
+Query -- Repository
+Query -- CodeSmell
+Query -- CodeSmellLifespan
 
 class Repository {
   +name: String!
