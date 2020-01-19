@@ -22,7 +22,7 @@ import { AsyncIterableX } from 'ix/asynciterable'
 import { keyBy } from './util'
 import { IterableX } from 'ix/iterable'
 
-export const resolveRepoDir = ({ repoRoot, repository }: RepoSpec & RepoRootSpec) =>
+export const resolveRepoDir = ({ repoRoot, repository }: RepoSpec & RepoRootSpec): string =>
     path.join(repoRoot, repository + '.git')
 
 export async function filterValidCommits({
@@ -61,7 +61,7 @@ export function validateObjectID(value: unknown): GitObjectID {
     return value
 }
 
-export async function validateCommit({
+export async function checkCommitExists({
     repository,
     commit,
     repoRoot,
@@ -322,13 +322,23 @@ export async function listFiles({
     }
 }
 
-export async function validateRepository({ repository, repoRoot }: { repository: string; repoRoot: string }) {
+export function validateRepositoryName({ repository }: RepoSpec): string {
     if (!/^[\w-_.]+$/.test(repository)) {
-        throw new Error('Invalid repository name')
+        throw Object.assign(new Error('Invalid repository name'), { status: 400 })
     }
     if (repository.endsWith('.git')) {
-        throw new Error('Repository names cannot end with .git')
+        throw Object.assign(new Error('Repository names cannot end with .git'), { status: 400 })
     }
+    return repository
+}
+
+export async function checkRepositoryExists({
+    repository,
+    repoRoot,
+}: {
+    repository: string
+    repoRoot: string
+}) {
     try {
         await fs.stat(resolveRepoDir({ repoRoot, repository }))
     } catch (err) {
@@ -419,6 +429,21 @@ export async function init({
     await exec('git', ['init', '--bare'], { cwd: repo })
     // Allow git push
     await exec('git', ['config', '--bool', 'http.receivepack', 'true'], { cwd: repo })
+}
+
+export function unbundle({
+    repoRoot,
+    repository,
+    bundlePath,
+}: {
+    repoRoot: string
+    repository: string
+    bundlePath: string
+}): exec.ExecaChildProcess {
+    const cwd = resolveRepoDir({ repoRoot, repository })
+    // Fetch all branches and tags from the bundle
+    // No "+", must be a fast forward
+    return exec('git', ['fetch', '--tags', bundlePath, 'refs/heads/*:refs/heads/*'], { cwd })
 }
 
 export async function sortTopologically(

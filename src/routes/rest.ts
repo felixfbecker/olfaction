@@ -35,8 +35,8 @@ export const createRestRouter = ({
             const { repository, commit } = req.params
             const { kind, message, locations } = req.body
 
-            await git.validateRepository({ repository, repoRoot })
-            await git.validateCommit({ repository, commit, repoRoot })
+            await git.checkRepositoryExists({ repository, repoRoot })
+            await git.checkCommitExists({ repository, commit, repoRoot })
             const commitData = (await git.getCommits({ repository, commitShas: [commit], repoRoot })).get(
                 commit
             )

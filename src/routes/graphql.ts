@@ -16,7 +16,13 @@ import {
 } from 'graphql'
 import graphQLHTTPServer, { OptionsData } from 'express-graphql'
 import * as pg from 'pg'
-import { listRepositories, validateRepository, validateCommit, validateObjectID, GitLogFilters } from '../git'
+import {
+    listRepositories,
+    checkRepositoryExists,
+    checkCommitExists,
+    validateObjectID,
+    GitLogFilters,
+} from '../git'
 import sql from 'sql-template-strings'
 import { Loaders, createLoaders, ForwardConnectionArguments, KindFilter } from '../loaders'
 import {
@@ -810,7 +816,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
 
     const query = {
         async repository({ name }: { name: string }) {
-            await validateRepository({ repository: name, repoRoot })
+            await checkRepositoryExists({ repository: name, repoRoot })
             return new RepositoryResolver(name)
         },
         async repositories(args: ForwardConnectionArguments): Promise<Connection<RepositoryResolver>> {
@@ -843,8 +849,8 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             },
             { loaders }: Context
         ): Promise<CodeSmellResolver[]> {
-            await validateRepository({ repository, repoRoot })
-            await validateCommit({ repository, commit, repoRoot })
+            await checkRepositoryExists({ repository, repoRoot })
+            await checkCommitExists({ repository, commit, repoRoot })
 
             return withDBConnection(dbPool, db =>
                 transaction(db, () =>
