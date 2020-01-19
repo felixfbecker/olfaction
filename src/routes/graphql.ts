@@ -797,6 +797,14 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return transaction(db, () =>
                 Promise.all(
                     codeSmells.map(async ({ kind, message, locations, lifespan, ordinal }) => {
+                        for (const location of locations) {
+                            if (path.posix.isAbsolute(location.file)) {
+                                throw new Error(
+                                    `File path must be relative to repository root: ${location.file}`
+                                )
+                            }
+                            location.file = path.normalize(location.file)
+                        }
                         const locationsJson = JSON.stringify(locations)
                         // Get or create lifespan with ID passed from client
                         const lifespanResult = await db.query<{ id: UUID }>(sql`
