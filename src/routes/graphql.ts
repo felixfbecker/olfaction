@@ -11,10 +11,12 @@ import {
     GraphQLInputObjectType,
     execute,
     GraphQLEnumType,
+    GraphQLScalarType,
+    Kind,
 } from 'graphql'
 import graphQLHTTPServer, { OptionsData } from 'express-graphql'
 import * as pg from 'pg'
-import { listRepositories, validateRepository, validateCommit } from '../git'
+import { listRepositories, validateRepository, validateCommit, validateObjectID } from '../git'
 import sql from 'sql-template-strings'
 import { Loaders, createLoaders, ForwardConnectionArguments } from '../loaders'
 import {
@@ -37,7 +39,7 @@ import { transaction, mapConnectionNodes, logDuration } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 import { connectionDefinitions, forwardConnectionArgs, Connection, connectionFromArray } from 'graphql-relay'
-import { last } from 'lodash'
+import { last, identity } from 'lodash'
 
 interface Context {
     loaders: Loaders
@@ -54,6 +56,19 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             description: 'Encoding to use. If not given, will try to auto-detect, otherwise default to UTF8.',
         },
     }
+
+    var GitObjectIDType = new GraphQLScalarType({
+        name: 'GitObjectID',
+        description: 'A 40-character Git object ID.',
+        serialize: identity,
+        parseValue: validateObjectID,
+        parseLiteral: ast => {
+            if (ast.kind !== Kind.STRING) {
+                throw new Error('Git object ID must be String')
+            }
+            return validateObjectID(ast.value)
+        },
+    })
 
     var SignatureType = new GraphQLObjectType<Signature>({
         name: 'Signature',
@@ -133,7 +148,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         name: 'Commit',
         description: 'A git commit object.',
         fields: () => ({
-            oid: { type: GraphQLNonNull(GraphQLString) },
+            oid: { type: GraphQLNonNull(GitObjectIDType) },
             message: { type: GraphQLNonNull(GraphQLString) },
             subject: { type: GraphQLNonNull(GraphQLString) },
             author: { type: GraphQLNonNull(SignatureType) },
@@ -346,7 +361,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 type: CommitType,
                 args: {
                     oid: {
-                        type: GraphQLNonNull(GraphQLString),
+                        type: GraphQLNonNull(GitObjectIDType),
                     },
                 },
                 // resolve: (source: RepoSpec, { oid }: { oid: string }, { loaders }: Context) => {

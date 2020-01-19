@@ -52,6 +52,13 @@ export async function filterValidCommits({
     }
 }
 
+export function validateObjectID(value: unknown): GitObjectID {
+    if (typeof value !== 'string' || !/[a-z0-9]{40}/.test(value)) {
+        throw new Error('Not a valid Git object ID: ' + value)
+    }
+    return value
+}
+
 export async function validateCommit({
     repository,
     commit,
@@ -61,9 +68,7 @@ export async function validateCommit({
     repository: string
     commit: GitObjectID
 }): Promise<void> {
-    if (!/[a-z0-9]{40}/.test(commit) || commit === '0'.repeat(40)) {
-        throw new Error('Invalid commit OID')
-    }
+    validateObjectID(commit)
     const filtered = await filterValidCommits({ repository, commitShas: [commit], repoRoot })
     if (filtered.length === 0) {
         throw new UnknownCommitError({ repository, commit })
