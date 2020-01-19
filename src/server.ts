@@ -9,6 +9,7 @@ import { createRepoUploadRouter } from './routes/git'
 import { Server } from 'http'
 import { AddressInfo } from 'net'
 import { createRestRouter } from './routes/rest'
+import compression from 'compression'
 
 const repoRoot = path.resolve(process.env.REPO_ROOT || path.resolve(process.cwd(), 'repos'))
 const port = (process.env.PORT && parseInt(process.env.PORT, 10)) || 4040
@@ -20,6 +21,8 @@ async function main(): Promise<void> {
 
     const db = new Client()
     await db.connect()
+
+    app.use(compression())
 
     app.use(morgan('dev', { immediate: false }))
 

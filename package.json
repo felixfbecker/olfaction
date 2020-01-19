@@ -14,6 +14,7 @@
   "devDependencies": {
     "@sourcegraph/eslint-config": "^0.5.3",
     "@types/chardet": "^0.8.0",
+    "@types/compression": "^1.0.1",
     "@types/express": "^4.17.1",
     "@types/express-graphql": "^0.9.0",
     "@types/graphql": "^14.2.3",
@@ -36,6 +37,7 @@
     "async-middleware": "^1.2.1",
     "cgi": "^0.3.1",
     "chardet": "^0.8.0",
+    "compression": "^1.7.4",
     "dataloader": "^1.4.0",
     "execa": "^4.0.0",
     "express": "^4.17.1",
