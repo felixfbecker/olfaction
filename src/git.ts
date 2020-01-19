@@ -5,7 +5,7 @@ import { AbortError } from './abort'
 import {
     RepoSpec,
     CommitSpec,
-    SHA,
+    GitObjectID,
     FileSpec,
     RepoRootSpec,
     CodeSmell,
@@ -30,8 +30,8 @@ export async function filterValidCommits({
 }: {
     repoRoot: string
     repository: string
-    commitShas: Iterable<SHA>
-}): Promise<SHA[]> {
+    commitShas: Iterable<GitObjectID>
+}): Promise<GitObjectID[]> {
     try {
         const { stdout } = await exec('git', ['rev-list', '--ignore-missing', '--no-walk', '--stdin', '--'], {
             cwd: path.join(repoRoot, repository),
@@ -59,10 +59,10 @@ export async function validateCommit({
 }: {
     repoRoot: string
     repository: string
-    commit: SHA
+    commit: GitObjectID
 }): Promise<void> {
     if (!/[a-z0-9]{40}/.test(commit) || commit === '0'.repeat(40)) {
-        throw new Error('Invalid commit SHA')
+        throw new Error('Invalid commit OID')
     }
     const filtered = await filterValidCommits({ repository, commitShas: [commit], repoRoot })
     if (filtered.length === 0) {
@@ -110,7 +110,7 @@ const commitFormat: string = [
  */
 const parseCommit = (chunk: string): Commit => {
     const [
-        sha,
+        oid,
         authorName,
         authorEmail,
         authorDate,
@@ -120,7 +120,7 @@ const parseCommit = (chunk: string): Commit => {
         ...messageLines
     ] = chunk.split('\n')
     return {
-        sha,
+        oid,
         author: {
             name: authorName,
             email: authorEmail,
@@ -142,8 +142,8 @@ export async function getCommits({
 }: {
     repoRoot: string
     repository: string
-    commitShas: Iterable<SHA>
-}): Promise<ReadonlyMap<SHA, Commit>> {
+    commitShas: Iterable<GitObjectID>
+}): Promise<ReadonlyMap<GitObjectID, Commit>> {
     // Bulk-validate the commits first, because git show fails hard on bad revisions
     const filteredCommitShas = await filterValidCommits({ repoRoot, repository, commitShas })
     try {
@@ -162,7 +162,7 @@ export async function getCommits({
             { cwd: path.join(repoRoot, repository) }
         )
         const commits = IterableX.from(stdout.split('\0')).map(parseCommit)
-        const commitsBySha = keyBy(commits, c => c.sha)
+        const commitsBySha = keyBy(commits, c => c.oid)
         return commitsBySha
     } catch (err) {
         if (err.code === 'ENOENT') {
@@ -180,8 +180,8 @@ export async function getCombinedCommitDifference({
 }: {
     repoRoot: string
     repository: string
-    commitShas: IterableX<SHA>
-}): Promise<ReadonlyMap<SHA, CombinedFileDifference[]>> {
+    commitShas: IterableX<GitObjectID>
+}): Promise<ReadonlyMap<GitObjectID, CombinedFileDifference[]>> {
     // Bulk-validate the commits first, because git show fails hard on bad revisions
     const filteredCommitShas = await filterValidCommits({ repoRoot, repository, commitShas })
     try {
@@ -202,11 +202,11 @@ export async function getCombinedCommitDifference({
             ],
             { cwd: path.join(repoRoot, repository) }
         )
-        const map = new Map<SHA, CombinedFileDifference[]>()
+        const map = new Map<GitObjectID, CombinedFileDifference[]>()
         const commitsWithChanges = IterableX.from(stdout.split('\0'))
             .filter(line => line !== '')
             .map(commitChunk => {
-                const [sha, ...fileLines] = commitChunk.split('\n')
+                const [oid, ...fileLines] = commitChunk.split('\n')
                 const changes = fileLines
                     .filter(fileLine => fileLine !== '')
                     .map(fileLine => {
@@ -236,10 +236,10 @@ export async function getCombinedCommitDifference({
                         }
                         return { changeKinds, headPath, basePaths }
                     })
-                return { sha, changes }
+                return { oid, changes }
             })
-        for (const { sha, changes } of commitsWithChanges) {
-            map.set(sha, changes)
+        for (const { oid, changes } of commitsWithChanges) {
+            map.set(oid, changes)
         }
         return map
     } catch (err) {
@@ -296,7 +296,7 @@ export async function listFiles({
     repoRoot,
 }: {
     repository: string
-    commit: SHA
+    commit: GitObjectID
     repoRoot: string
 }): Promise<File[]> {
     try {

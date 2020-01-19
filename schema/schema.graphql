@@ -196,7 +196,7 @@ type CombinedFileDifferenceEdge {
 A git commit object.
 """
 type Commit {
-  sha: String!
+  oid: String!
   message: String!
   subject: String!
   author: Signature!
@@ -204,9 +204,10 @@ type Commit {
   parents: [Commit!]!
 
   """
-  The file differences between this commit and its parent in git's combined diff
-  format. This list contains one element for each file that is different in this
-  commit when compared to one of its parents.
+  The file differences between this commit and its parents in [Git's combined diff
+  format](https://git-scm.com/docs/git-diff-tree#_combined_diff_format).This
+  list contains one element for each file that is different in this commit when
+  compared to one of its parents.
   """
   combinedFileDifferences(after: String, first: Int): CombinedFileDifferenceConnection!
 
@@ -440,7 +441,7 @@ type Repository {
     """
     grep: String
   ): CommitConnection!
-  commit(sha: String!): Commit
+  commit(oid: String!): Commit
   codeSmellLifespans(after: String, first: Int, kind: String): CodeSmellLifeSpanConnection!
 }
 

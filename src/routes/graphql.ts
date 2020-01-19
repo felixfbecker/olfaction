@@ -133,7 +133,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         name: 'Commit',
         description: 'A git commit object.',
         fields: () => ({
-            sha: { type: GraphQLNonNull(GraphQLString) },
+            oid: { type: GraphQLNonNull(GraphQLString) },
             message: { type: GraphQLNonNull(GraphQLString) },
             subject: { type: GraphQLNonNull(GraphQLString) },
             author: { type: GraphQLNonNull(SignatureType) },
@@ -345,12 +345,12 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             commit: {
                 type: CommitType,
                 args: {
-                    sha: {
+                    oid: {
                         type: GraphQLNonNull(GraphQLString),
                     },
                 },
-                // resolve: (source: RepoSpec, { sha }: { sha: string }, { loaders }: Context) => {
-                //     return loaders.commit.load({ ...source, commit: sha })
+                // resolve: (source: RepoSpec, { oid }: { oid: string }, { loaders }: Context) => {
+                //     return loaders.commit.load({ ...source, commit: oid })
                 // },
             },
             codeSmellLifespans: {
@@ -461,8 +461,8 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             )
         }
 
-        async commit({ sha }: { sha: string }, { loaders }: Context) {
-            const commit = await loaders.commit.bySha.load({ repository: this.name, commit: sha })
+        async commit({ oid }: { oid: string }, { loaders }: Context) {
+            const commit = await loaders.commit.bySha.load({ repository: this.name, commit: oid })
             return createCommitResolver({ repository: this.name }, commit)
         }
 
@@ -602,7 +602,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     }
 
     const createCommitResolver = ({ repository }: RepoSpec, commit: Commit) => {
-        const spec = { repository, commit: commit.sha }
+        const spec = { repository, commit: commit.oid }
         return {
             ...commit,
             repository: () => new RepositoryResolver(repository),
@@ -645,7 +645,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 args: ForwardConnectionArguments,
                 { loaders }: Context
             ): Promise<Connection<FileResolver>> {
-                const files = await loaders.files.load({ repository, commit: commit.sha })
+                const files = await loaders.files.load({ repository, commit: commit.oid })
 
                 return connectionFromArray(
                     files.map(file => new FileResolver({ ...spec, file: file.path })),

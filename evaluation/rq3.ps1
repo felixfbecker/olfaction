@@ -14,7 +14,7 @@ $body = (@{
                         commits(grep: $messagePattern) {
                             edges {
                                 node {
-                                    sha
+                                    oid
                                     combinedFileDifferences {
                                         edges {
                                             node {
@@ -64,7 +64,7 @@ $result.data.repositories.edges |
             }
         if ($grouped) {
             [pscustomobject]@{
-                Commit = $commit.sha
+                Commit = $commit.oid
                 FileChangesWithCodeSmell    = if ($grouped.ContainsKey($true)) { $grouped[$true].Count } else { 0 }
                 FileChangesWithoutCodeSmell = if ($grouped.ContainsKey($false)) { $grouped[$false].Count } else { 0 }
             }

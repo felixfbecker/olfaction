@@ -54,7 +54,7 @@ $body = (@{
                         commits {
                             edges {
                                 node {
-                                    sha
+                                    oid
                                     # Get all files to determine breadth of software
                                     files {
                                         edges {
@@ -99,7 +99,7 @@ Write-Verbose "Got result"
 $result.data.repositories.edges.node.commits.edges.node |
     ForEach-Object {
         $commit = $_
-        Write-Verbose "Commit $($commit.sha)"
+        Write-Verbose "Commit $($commit.oid)"
         Write-Verbose "$($commit.files.edges.Count) files"
         # Calculate breadth of software at this commit
         $breadth = (Measure-PairwiseDirectoryDistances -Paths ($commit.files.edges | ForEach-Object { $_.node.path }) | Measure-Object -Maximum).Maximum

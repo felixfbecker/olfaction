@@ -1,5 +1,5 @@
 export type UUID = string
-export type SHA = string
+export type GitObjectID = string
 
 export interface Range {
     start: Position
@@ -30,7 +30,7 @@ export interface Signature {
 }
 
 export interface Commit {
-    sha: SHA
+    oid: GitObjectID
     author: Signature
     committer: Signature
     message: string
@@ -73,7 +73,7 @@ export interface CodeSmell {
     locations: Location[]
     lifespan: UUID
     ordinal: number
-    commit: SHA
+    commit: GitObjectID
 }
 
 export interface CodeSmellInput {
@@ -101,7 +101,7 @@ export interface RepoSpec {
 }
 
 export interface CommitSpec {
-    commit: SHA
+    commit: GitObjectID
 }
 
 export interface FileSpec {

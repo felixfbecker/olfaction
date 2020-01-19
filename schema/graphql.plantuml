@@ -10,7 +10,7 @@ Query --> Repository
 
 class Repository {
   +name: String!
-  {method} +commit(sha: String!): Commit
+  {method} +commit(oid: String!): Commit
   {method} +commits: Connection<Commit>!
   {method} +codeSmellLifespans: Connection<CodeSmellLifespan>!
 }
@@ -18,7 +18,7 @@ Repository "1" *-- "0..*" Commit
 Repository "1" *-- "0..*" CodeSmellLifespan
 
 class Commit {
-  +sha: String!
+  +oid: String!
   +committer: Signature!
   +author: Signature!
   {method} +combinedFileDifferencees: Connection<CombinedFileDifference>!

@@ -441,18 +441,18 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         specs.map(async ({ repository, first, after, grep }) => {
                             try {
                                 const cursor =
-                                    (after && parseCursor<Commit>(after, new Set(['sha']))) || undefined
+                                    (after && parseCursor<Commit>(after, new Set(['oid']))) || undefined
                                 const commits = await git
                                     .log({ repository, commit: cursor?.value, grep, repoRoot })
                                     .tap((commit: Commit) =>
-                                        loaders.commit.bySha.prime({ repository, commit: commit.sha }, commit)
+                                        loaders.commit.bySha.prime({ repository, commit: commit.oid }, commit)
                                     )
                                     .take(typeof first === 'number' ? first + 1 : Infinity)
                                     .toArray()
                                 return connectionFromOverfetchedResult<Commit>(
                                     commits,
                                     { first, after },
-                                    'sha'
+                                    'oid'
                                 )
                             } catch (err) {
                                 return asError(err)
