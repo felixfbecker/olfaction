@@ -13,7 +13,6 @@ import {
     Commit,
     CombinedFileDifference,
     ChangeKind,
-    RevisionSpec,
 } from './models'
 import { UnknownRepositoryError, UnknownCommitError, UnknownRevisionError } from './errors'
 import { take, filter } from 'ix/asynciterable/pipe/index'
@@ -22,7 +21,9 @@ import { fromNodeStream } from 'ix'
 import { AsyncIterableX } from 'ix/asynciterable'
 import { keyBy } from './util'
 import { IterableX } from 'ix/iterable'
-import assert from 'assert'
+
+export const resolveRepoDir = ({ repoRoot, repository }: RepoSpec & RepoRootSpec) =>
+    path.join(repoRoot, repository + '.git')
 
 export async function filterValidCommits({
     repository,
@@ -35,7 +36,7 @@ export async function filterValidCommits({
 }): Promise<GitObjectID[]> {
     try {
         const { stdout } = await exec('git', ['rev-list', '--ignore-missing', '--no-walk', '--stdin', '--'], {
-            cwd: path.join(repoRoot, repository),
+            cwd: resolveRepoDir({ repoRoot, repository }),
             input: IterableX.from(commitShas)
                 .filter(c => /[a-f0-9]{40}/.test(c))
                 .map(commitSha => commitSha + '\n')
@@ -84,7 +85,7 @@ export async function getFileContent({
 }: RepoRootSpec & RepoSpec & FileSpec & CommitSpec): Promise<Buffer> {
     const { stdout } = await exec('git', ['show', `${commit}:${file}`], {
         encoding: null,
-        cwd: path.join(repoRoot, repository),
+        cwd: resolveRepoDir({ repoRoot, repository }),
     })
     return stdout
 }
@@ -165,7 +166,7 @@ export async function getCommits({
                 ...filteredCommitShas,
                 '--',
             ],
-            { cwd: path.join(repoRoot, repository) }
+            { cwd: resolveRepoDir({ repoRoot, repository }) }
         )
         const commits = IterableX.from(stdout.split('\0')).map(parseCommit)
         const commitsBySha = keyBy(commits, c => c.oid)
@@ -206,7 +207,7 @@ export async function getCombinedCommitDifference({
                 ...filteredCommitShas,
                 '--',
             ],
-            { cwd: path.join(repoRoot, repository) }
+            { cwd: resolveRepoDir({ repoRoot, repository }) }
         )
         const map = new Map<GitObjectID, CombinedFileDifference[]>()
         const commitsWithChanges = IterableX.from(stdout.split('\0'))
@@ -268,7 +269,7 @@ export async function getFileContents({
     const fileStrings = files.map(f => `${f.commit}:${f.file}`)
     try {
         const { stdout } = await exec('git', ['cat-file', '--batch', '--format=>>>%(rest)'], {
-            cwd: path.join(repoRoot, repository),
+            cwd: resolveRepoDir({ repoRoot, repository }),
             input: fileStrings.map(f => `${f} ${f}`).join('\n'),
         })
         const lines = stdout.split('\n')
@@ -307,7 +308,7 @@ export async function listFiles({
 }): Promise<File[]> {
     try {
         const { stdout } = await exec('git', ['ls-tree', '-r', '--name-only', '--full-name', commit], {
-            cwd: path.resolve(repoRoot, repository),
+            cwd: resolveRepoDir({ repoRoot, repository }),
         })
         return stdout.split('\n').map(path => ({ path }))
     } catch (err) {
@@ -329,7 +330,7 @@ export async function validateRepository({ repository, repoRoot }: { repository:
         throw new Error('Repository names cannot end with .git')
     }
     try {
-        await fs.stat(path.join(repoRoot, repository))
+        await fs.stat(resolveRepoDir({ repoRoot, repository }))
     } catch (err) {
         if (err.code === 'ENOENT') {
             throw new UnknownRepositoryError({ repository })
@@ -367,7 +368,7 @@ export const log = ({
     if (startRevision.includes('..')) {
         throw new Error(`Start revision cannot be a revision range: ${startRevision}`)
     }
-    const cwd = path.join(repoRoot, repository)
+    const cwd = resolveRepoDir({ repoRoot, repository })
     const gitProcess = exec(
         'git',
         [
@@ -412,7 +413,7 @@ export async function init({
     repoRoot: string
     repository: string
 }): Promise<void> {
-    const repo = path.resolve(repoRoot, repository)
+    const repo = resolveRepoDir({ repoRoot, repository })
     await fs.mkdir(repo)
     await exec('git', ['init', '--bare'], { cwd: repo })
     // Allow git push

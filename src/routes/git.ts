@@ -24,7 +24,7 @@ export const createRepoUploadRouter = ({ repoRoot }: RepoRootSpec): Router => {
     })
 
     router.all<{ repository: string }>(
-        '/:repository/*',
+        '/:repository.git/*',
         wrap(async (req, res, next) => {
             const repository = req.params.repository
             try {
