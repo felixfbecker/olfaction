@@ -35,7 +35,7 @@ import {
     CodeSmellInput,
     ChangeKind,
 } from '../models'
-import { transaction, mapConnectionNodes, logDuration } from '../util'
+import { transaction, mapConnectionNodes, logDuration, DBContext, withDBConnection } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 import { connectionDefinitions, forwardConnectionArgs, Connection, connectionFromArray } from 'graphql-relay'
@@ -51,7 +51,7 @@ export interface GraphQLHandler {
     rootValue: unknown
     schema: GraphQLSchema
 }
-export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot: string }): GraphQLHandler {
+export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootSpec): GraphQLHandler {
     var encodingArg: GraphQLFieldConfigArgumentMap = {
         encoding: {
             type: GraphQLString,
@@ -809,37 +809,39 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             await validateRepository({ repository, repoRoot })
             await validateCommit({ repository, commit, repoRoot })
 
-            return transaction(db, () =>
-                Promise.all(
-                    codeSmells.map(async ({ kind, message, locations, lifespan, ordinal }) => {
-                        for (const location of locations) {
-                            if (path.posix.isAbsolute(location.file)) {
-                                throw new Error(
-                                    `File path must be relative to repository root: ${location.file}`
-                                )
+            return withDBConnection(dbPool, db =>
+                transaction(db, () =>
+                    Promise.all(
+                        codeSmells.map(async ({ kind, message, locations, lifespan, ordinal }) => {
+                            for (const location of locations) {
+                                if (path.posix.isAbsolute(location.file)) {
+                                    throw new Error(
+                                        `File path must be relative to repository root: ${location.file}`
+                                    )
+                                }
+                                location.file = path.normalize(location.file)
                             }
-                            location.file = path.normalize(location.file)
-                        }
-                        const locationsJson = JSON.stringify(locations)
-                        // Get or create lifespan with ID passed from client
-                        const lifespanResult = await db.query<{ id: UUID }>(sql`
-                            insert into code_smell_lifespans (id, kind, repository)
-                            values (${lifespan}, ${kind}, ${repository})
-                            on conflict on constraint code_smell_lifespans_pkey do nothing
-                            returning id
-                        `)
-                        const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
-                        const result = await db.query<CodeSmell>(sql`
-                            insert into code_smells
-                                        ("commit", "message", locations, lifespan, ordinal)
-                            values      (${commit}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
-                            returning   id, "commit", "message", locations, lifespan, ordinal
-                        `)
-                        const codeSmell = result.rows[0]
-                        loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
-                        loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
-                        return new CodeSmellResolver(codeSmell)
-                    })
+                            const locationsJson = JSON.stringify(locations)
+                            // Get or create lifespan with ID passed from client
+                            const lifespanResult = await db.query<{ id: UUID }>(sql`
+                                insert into code_smell_lifespans (id, kind, repository)
+                                values (${lifespan}, ${kind}, ${repository})
+                                on conflict on constraint code_smell_lifespans_pkey do nothing
+                                returning id
+                            `)
+                            const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
+                            const result = await db.query<CodeSmell>(sql`
+                                insert into code_smells
+                                            ("commit", "message", locations, lifespan, ordinal)
+                                values      (${commit}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
+                                returning   id, "commit", "message", locations, lifespan, ordinal
+                            `)
+                            const codeSmell = result.rows[0]
+                            loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
+                            loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
+                            return new CodeSmellResolver(codeSmell)
+                        })
+                    )
                 )
             )
         },
@@ -853,11 +855,11 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     return { schema, rootValue }
 }
 
-export const createGraphQLContext = (options: { db: pg.Client } & RepoRootSpec) => ({
+export const createGraphQLContext = (options: DBContext & RepoRootSpec) => ({
     loaders: createLoaders(options),
 })
 
-export const createGraphQLHTTPHandler = (options: GraphQLHandler & { db: pg.Client } & RepoRootSpec) =>
+export const createGraphQLHTTPHandler = (options: GraphQLHandler & DBContext & RepoRootSpec) =>
     graphQLHTTPServer(() => ({
         ...options,
         customExecuteFn: logDuration('graphql.execute', args => Promise.resolve(execute(args))),

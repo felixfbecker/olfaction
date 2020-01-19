@@ -10,16 +10,16 @@ import sql from 'sql-template-strings'
 import gql from 'tagged-template-noop'
 import { graphql } from 'graphql'
 import { GraphQLHandler, createGraphQLContext } from './graphql'
-import { dataOrErrors } from '../util'
+import { dataOrErrors, DBContext } from '../util'
 import LinkHeader from 'http-link-header'
 import { Connection } from 'graphql-relay'
 import originalUrl from 'original-url'
 
 export const createRestRouter = ({
     repoRoot,
-    db,
+    dbPool,
     graphQLHandler,
-}: RepoRootSpec & { db: Client; graphQLHandler: GraphQLHandler }): Router => {
+}: RepoRootSpec & DBContext & { graphQLHandler: GraphQLHandler }): Router => {
     const router = Router()
 
     router.post<{ repository: string; commit: string }>(
@@ -33,7 +33,7 @@ export const createRestRouter = ({
             const commitData = (await git.getCommits({ repository, commitShas: [commit], repoRoot })).get(
                 commit
             )
-            const result = await db.query(sql`
+            const result = await dbPool.query(sql`
                 INSERT INTO code_smells (kind, "message", locations, commit_id, commit_date)
                 VALUES (${kind}, ${message}, ${locations}, ${commit}, ${commitData!.committer.date})
                 RETURNING id
@@ -75,7 +75,7 @@ export const createRestRouter = ({
                     }
                 }
             `
-            const contextValue = createGraphQLContext({ db, repoRoot })
+            const contextValue = createGraphQLContext({ dbPool, repoRoot })
             const data = dataOrErrors(
                 await graphql({
                     ...graphQLHandler,

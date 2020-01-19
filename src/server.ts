@@ -1,7 +1,7 @@
 import 'source-map-support/register'
 
 import express, { Request, Response, NextFunction } from 'express'
-import { Client } from 'pg'
+import { Client, Pool, PoolClient, ClientBase } from 'pg'
 import * as path from 'path'
 import { createGraphQLHandler, createGraphQLHTTPHandler } from './routes/graphql'
 import morgan from 'morgan'
@@ -19,8 +19,7 @@ async function main(): Promise<void> {
 
     app.set('etag', true)
 
-    const db = new Client()
-    await db.connect()
+    const dbPool = new Pool()
 
     app.use(compression())
 
@@ -28,11 +27,11 @@ async function main(): Promise<void> {
 
     app.use('/git', createRepoUploadRouter({ repoRoot }))
 
-    const graphQLHandler = createGraphQLHandler({ db, repoRoot })
+    const graphQLHandler = createGraphQLHandler({ dbPool, repoRoot })
 
-    app.use('/graphql', createGraphQLHTTPHandler({ ...graphQLHandler, db, repoRoot }))
+    app.use('/graphql', createGraphQLHTTPHandler({ ...graphQLHandler, dbPool, repoRoot }))
 
-    app.use('/rest', createRestRouter({ repoRoot, db, graphQLHandler }))
+    app.use('/rest', createRestRouter({ repoRoot, dbPool, graphQLHandler }))
 
     app.use((err: any, req: Request, res: Response, next: NextFunction) => {
         console.error(err)

@@ -1,4 +1,4 @@
-import { Client } from 'pg'
+import { Client, ClientBase, Pool } from 'pg'
 import sql from 'sql-template-strings'
 import { Connection } from 'graphql-relay'
 import { ExecutionResult } from 'graphql'
@@ -11,7 +11,20 @@ export function keyBy<K, V>(items: Iterable<V>, by: (value: V) => K): Map<K, V> 
     return map
 }
 
-export async function transaction<T>(db: Client, fn: () => Promise<T>): Promise<T> {
+export interface DBContext {
+    dbPool: Pool
+}
+
+export async function withDBConnection<R>(pool: Pool, fn: (client: ClientBase) => Promise<R>): Promise<R> {
+    const client = await pool.connect()
+    try {
+        return await fn(client)
+    } finally {
+        client.release()
+    }
+}
+
+export async function transaction<T>(db: ClientBase, fn: () => Promise<T>): Promise<T> {
     await db.query(sql`BEGIN`)
     try {
         const result = await fn()

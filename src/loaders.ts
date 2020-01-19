@@ -14,8 +14,9 @@ import {
     Commit,
     CodeSmellSpec,
     CombinedFileDifference,
+    RepoRootSpec,
 } from './models'
-import { NullFields, base64encode, parseCursor, isNullArray, asError, logDuration } from './util'
+import { NullFields, base64encode, parseCursor, isNullArray, asError, logDuration, DBContext } from './util'
 import assert from 'assert'
 import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
@@ -130,11 +131,11 @@ async function mapCommitRepoSpecsGroupedByRepo<R>(
     return resultsByRepo
 }
 
-export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }): Loaders => {
+export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): Loaders => {
     var loaders: Loaders = {
         codeSmell: {
             byId: new DataLoader<CodeSmell['id'], CodeSmell>(async ids => {
-                const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
+                const result = await dbPool.query<CodeSmell | NullFields<CodeSmell>>(sql`
                     select code_smells.*
                     from unnest(${ids}::uuid[]) with ordinality as input_id
                     left join code_smells on input_id = code_smells.id
@@ -159,7 +160,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             ordinal,
                         }))
                     )
-                    const result = await db.query<CodeSmell | NullFields<CodeSmell>>(sql`
+                    const result = await dbPool.query<CodeSmell | NullFields<CodeSmell>>(sql`
                         select code_smells.*
                         from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "lifespan" uuid, "ordinal" int)
                         left join code_smells on code_smells.lifespan = input.lifespan
@@ -196,7 +197,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             }
                         })
                     )
-                    const result = await db.query<{
+                    const result = await dbPool.query<{
                         codeSmells: [null] | (CodeSmell & { lifespanObject: CodeSmellLifespan })[]
                     }>(sql`
                         select input."index", array_agg(to_jsonb(c)) as "codeSmells"
@@ -267,7 +268,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             return { lifespan, index, first, after: cursor?.value }
                         })
                     )
-                    const result = await db.query<{
+                    const result = await dbPool.query<{
                         instances: CodeSmell[] | [null]
                     }>(sql`
                         select array_agg(to_jsonb(c) order by c."ordinal") as instances
@@ -301,7 +302,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
         codeSmellLifespan: {
             byId: new DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>(
                 logDuration('loaders.codeSmellLifespan.byId', async ids => {
-                    const result = await db.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
+                    const result = await dbPool.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
                         select *
                         from unnest(${ids}::uuid[]) with ordinality as input_id
                         left join code_smells_lifespans on input_id = code_smell_lifespans.id
@@ -327,7 +328,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             return { ordinality, repository, kind, first, after: cursor?.value }
                         })
                     )
-                    const result = await db.query<{
+                    const result = await dbPool.query<{
                         lifespans: [null] | CodeSmellLifespan[]
                     }>(sql`
                         select array_agg(to_jsonb(l)) as "lifespans"
