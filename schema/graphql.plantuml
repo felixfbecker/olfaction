@@ -93,13 +93,27 @@ class CodeSmellLifespan {
 }
 CodeSmellLifespan "1" *-- "1..n" CodeSmell
 
+class LineCounts {
+  +total: Int!
+  +source: Int
+  +comment: Int
+  +single: Int
+  +block: Int
+  +mixed: Int
+  +blockEmpty: Int
+  +empty: Int
+  +todo: Int
+}
+
 class File {
   +path: String!
   +linesCount: Int!
-  +contents(encoding: String): String!
+  +content(encoding: String): String!
+  +lineCounts(encoding: String): LineCounts!
   {method} +codeSmells: Connection<CodeSmell>!
 }
 File "1..*" *-- "0..*" CodeSmell : contains >
+File --> LineCounts : has >
 
 namespace Relay {
   interface Connection<TNode> {
