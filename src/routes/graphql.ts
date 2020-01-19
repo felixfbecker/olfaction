@@ -18,7 +18,7 @@ import graphQLHTTPServer, { OptionsData } from 'express-graphql'
 import * as pg from 'pg'
 import { listRepositories, validateRepository, validateCommit, validateObjectID, GitLogFilters } from '../git'
 import sql from 'sql-template-strings'
-import { Loaders, createLoaders, ForwardConnectionArguments } from '../loaders'
+import { Loaders, createLoaders, ForwardConnectionArguments, KindFilter } from '../loaders'
 import {
     Location,
     CodeSmell,
@@ -56,6 +56,12 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         encoding: {
             type: GraphQLString,
             description: 'Encoding to use. If not given, will try to auto-detect, otherwise default to UTF8.',
+        },
+    }
+    var kindFilterArg: GraphQLFieldConfigArgumentMap = {
+        kind: {
+            type: GraphQLString,
+            description: 'Only return code smells with this kind.',
         },
     }
 
@@ -178,7 +184,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             },
             codeSmells: {
                 type: GraphQLNonNull(CodeSmellConnectionType),
-                args: forwardConnectionArgs,
+                args: { ...kindFilterArg, ...forwardConnectionArgs },
             },
         }),
     })
@@ -242,7 +248,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             },
             codeSmells: {
                 description: 'The code smells that exist in this file.',
-                args: forwardConnectionArgs,
+                args: { ...kindFilterArg, ...forwardConnectionArgs },
                 type: GraphQLNonNull(CodeSmellConnectionType),
             },
             lineCounts: {
@@ -363,9 +369,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             id: {
                 type: GraphQLNonNull(GraphQLID),
             },
-            kind: {
-                type: GraphQLString,
-            },
+            ...kindFilterArg,
             instances: {
                 args: forwardConnectionArgs,
                 type: GraphQLNonNull(CodeSmellConnectionType),
@@ -431,9 +435,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             codeSmellLifespans: {
                 args: {
                     ...forwardConnectionArgs,
-                    kind: {
-                        type: GraphQLString,
-                    },
+                    ...kindFilterArg,
                 },
                 type: GraphQLNonNull(CodeSmellLifespanConnectionType),
             },
@@ -542,7 +544,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         }
 
         async codeSmellLifespans(
-            { kind, ...args }: { kind?: string | null } & ForwardConnectionArguments,
+            { kind, ...args }: KindFilter & ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CodeSmellLifeSpanResolver>> {
             const connection = await loaders.codeSmellLifespan.forRepository.load({
@@ -710,7 +712,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             //     )
             // },
             async codeSmells(
-                args: ForwardConnectionArguments,
+                args: ForwardConnectionArguments & KindFilter,
                 { loaders }: Context
             ): Promise<Connection<CodeSmellResolver>> {
                 const connection = await loaders.codeSmell.forCommit.load({ ...spec, ...args })
@@ -753,7 +755,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return createCommitResolver(this.spec, commit)
         }
 
-        async codeSmells(args: ForwardConnectionArguments, { loaders }: Context) {
+        async codeSmells(args: ForwardConnectionArguments & KindFilter, { loaders }: Context) {
             const codeSmells = await loaders.codeSmell.forCommit.load({ ...this.spec, ...args })
             return codeSmells
         }

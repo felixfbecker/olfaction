@@ -25,6 +25,12 @@ import mapPromise from 'p-map'
 
 export type ForwardConnectionArguments = Pick<ConnectionArguments, 'first' | 'after'>
 
+/** Optional filter for the kind of a code smell. */
+export interface KindFilter {
+    /** Optional filter for the kind of a code smell. */
+    kind?: string
+}
+
 export interface Loaders {
     codeSmell: {
         /** Loads a code smell by ID. */
@@ -33,7 +39,7 @@ export interface Loaders {
         /** Loads the entire life span of a given lifespan ID. */
         forLifespan: DataLoader<CodeSmellLifespanSpec & ForwardConnectionArguments, Connection<CodeSmell>>
         forCommit: DataLoader<
-            RepoSpec & CommitSpec & Partial<FileSpec> & ForwardConnectionArguments,
+            RepoSpec & CommitSpec & Partial<FileSpec> & KindFilter & ForwardConnectionArguments,
             Connection<CodeSmell>
         >
     }
@@ -42,7 +48,7 @@ export interface Loaders {
         byId: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>
         /** Loads the code smell lifespans in a given repository. */
         forRepository: DataLoader<
-            RepoSpec & { kind?: string } & ForwardConnectionArguments,
+            RepoSpec & KindFilter & ForwardConnectionArguments,
             Connection<CodeSmellLifespan>
         >
     }
@@ -175,7 +181,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             forCommit: new DataLoader(
                 logDuration('loaders.codeSmell.forCommit', async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ repository, commit, file, first, after }, index) => {
+                        specs.map(({ repository, commit, file, kind, first, after }, index) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
                                 (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
@@ -184,6 +190,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                                 repository,
                                 commit,
                                 fileQuery: file ? [{ file }] : null,
+                                kind: kind || null,
                                 first,
                                 after: cursor?.value,
                             }
@@ -193,7 +200,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         codeSmells: [null] | (CodeSmell & { lifespanObject: CodeSmellLifespan })[]
                     }>(sql`
                         select input."index", array_agg(to_jsonb(c)) as "codeSmells"
-                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "fileQuery" jsonb, "first" int, "after" uuid)
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "fileQuery" jsonb, "kind" text, "first" int, "after" uuid)
                         left join lateral (
                             select code_smells.*, to_jsonb(code_smell_lifespans) as "lifespanObject"
                             from code_smells
@@ -202,7 +209,8 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                             where code_smell_lifespans.repository = input.repository
                             and code_smells.commit = input.commit
                             -- optional filters:
-                            and (jsonb_typeof(input."fileQuery") = 'null' or code_smells.locations @> input."fileQuery")
+                            and (input."fileQuery" is null or code_smells.locations @> input."fileQuery")
+                            and (input.kind is null or code_smell_lifespans.kind = input.kind)
                             -- pagination:
                             and (input.after is null or code_smells.id >= input.after) -- include one before to know whether there is a previous page
                             order by id asc
@@ -241,8 +249,8 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     )
                 }),
                 {
-                    cacheKeyFn: args =>
-                        repoAtCommitCacheKeyFn(args) + fileKeyFn(args) + connectionArgsKeyFn(args),
+                    cacheKeyFn: ({ repository, commit, file, kind, first, after }) =>
+                        objectHash({ repository, commit, file, kind, first, after }),
                 }
             ),
 
@@ -469,7 +477,10 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         })
                     )
                 ),
-                { cacheKeyFn: objectHash }
+                {
+                    cacheKeyFn: ({ repository, first, after, startRevision, messagePattern, since, until }) =>
+                        objectHash({ repository, first, after, startRevision, messagePattern, since, until }),
+                }
             ),
         },
     }
