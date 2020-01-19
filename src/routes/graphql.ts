@@ -40,6 +40,8 @@ import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 import { connectionDefinitions, forwardConnectionArgs, Connection, connectionFromArray } from 'graphql-relay'
 import { last, identity } from 'lodash'
+import sloc from 'sloc'
+import * as path from 'path'
 
 interface Context {
     loaders: Loaders
@@ -182,6 +184,48 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     })
     var { connectionType: CommitConnectionType } = connectionDefinitions({ nodeType: CommitType })
 
+    var LineCounts = new GraphQLObjectType<Record<sloc.Key, number>>({
+        name: 'LineCounts',
+        fields: {
+            total: {
+                description: 'Physical lines',
+                type: GraphQLNonNull(GraphQLInt),
+            },
+            source: {
+                description: 'Lines of code (source)',
+                type: GraphQLInt,
+            },
+            comment: {
+                description: 'Lines with comments',
+                type: GraphQLInt,
+            },
+            single: {
+                description: 'Lines with single-line comments',
+                type: GraphQLInt,
+            },
+            block: {
+                description: 'Lines with block comments',
+                type: GraphQLInt,
+            },
+            mixed: {
+                description: 'Lines mixed up with source and comments',
+                type: GraphQLInt,
+            },
+            blockEmpty: {
+                description: 'Empty lines within block comments',
+                type: GraphQLInt,
+            },
+            empty: {
+                description: 'Empty lines',
+                type: GraphQLInt,
+            },
+            todo: {
+                description: 'Lines with TODOs',
+                type: GraphQLInt,
+            },
+        },
+    })
+
     var FileType = new GraphQLObjectType<File>({
         name: 'File',
         fields: () => ({
@@ -192,7 +236,6 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 description:
                     'The file content from the git repository. null if the repository was not uploaded.',
             },
-            linesCount: { type: GraphQLInt },
             commit: {
                 description: 'The commit this file exists at.',
                 type: GraphQLNonNull(CommitType),
@@ -201,6 +244,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                 description: 'The code smells that exist in this file.',
                 args: forwardConnectionArgs,
                 type: GraphQLNonNull(CodeSmellConnectionType),
+            },
+            lineCounts: {
+                description: 'The amount of lines in this file.',
+                type: GraphQLNonNull(LineCounts),
             },
         }),
     })
@@ -598,7 +645,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         range(): Range {
             return this.spec.range
         }
-        async content({ encoding }: { encoding: string }, { loaders }: Context): Promise<string> {
+        async content({ encoding }: EncodingArgs, { loaders }: Context): Promise<string> {
             const buffer = await loaders.fileContent.load(this.spec)
             const { start, end } = this.spec.range
             const decoder = new TextDecoder(encoding || chardet.detect(buffer) || undefined)
@@ -671,6 +718,10 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     }
     type CommitResolver = ReturnType<typeof createCommitResolver>
 
+    interface EncodingArgs {
+        encoding: string
+    }
+
     class FileResolver {
         constructor(private spec: FileSpec & RepoSpec & CommitSpec) {}
 
@@ -678,7 +729,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return this.spec.file
         }
 
-        async content({ encoding }: { encoding: string }, { loaders }: Context): Promise<string> {
+        async content({ encoding }: EncodingArgs, { loaders }: Context): Promise<string> {
             const content = await loaders.fileContent.load(this.spec)
             const decoder = new TextDecoder(encoding || chardet.detect(content) || undefined)
             return decoder.decode(content)
@@ -694,11 +745,18 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return codeSmells
         }
 
-        async linesCount(args: {}, { loaders }: Context) {
-            const buffer = await loaders.fileContent.load(this.spec)
-            const decoder = new TextDecoder(chardet.detect(buffer) || undefined)
-            const str = decoder.decode(buffer)
-            return str.split('\n').length
+        async lineCounts(args: EncodingArgs, context: Context) {
+            const content = await this.content(args, context)
+            try {
+                return sloc(content, path.extname(this.spec.file).slice(1))
+            } catch (err) {
+                if (err.message.includes('not supported')) {
+                    return {
+                        total: content.match(/\n/g)?.length ?? 0,
+                    }
+                }
+                throw err
+            }
         }
     }
 
