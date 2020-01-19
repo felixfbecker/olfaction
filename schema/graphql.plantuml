@@ -1,6 +1,7 @@
 @startuml graphql
 hide circle
 hide empty members
+skinparam ArrowFontSize 11
 
 class Query {
   {method} +repository(name: String!): Repository
@@ -31,8 +32,8 @@ class Commit {
 }
 Commit --> Signature : committed by >
 Commit --> Signature : authored by >
-Commit "1" *-- "0..*" CodeSmell
-Commit "1" *-- "0..*" File
+Commit "1" *-- "0..*" CodeSmell : exists in <
+Commit "1" *-- "0..*" File : exists in <
 Commit "1" *-- "0..*" CombinedFileDifference
 
 class CombinedFileDifference {
@@ -119,21 +120,4 @@ class File {
 File "1..*" *-- "0..*" CodeSmell : contains >
 File --> LineCounts : has >
 
-namespace Relay {
-  interface Connection<TNode> {
-    +pageInfo: PageInfo!
-    +edges: [Edge<TNode>!]!
-  }
-  Connection --> Edge
-  Connection --> PageInfo
-  class PageInfo {
-    +endCursor: String!
-    +hasNextPage: Boolean!
-    +hasPreviousPage: Boolean!
-  }
-  interface Edge<TNode> {
-    +node: TNode!
-    +cursor: String!
-  }
-}
 @enduml

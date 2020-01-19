@@ -1,0 +1,23 @@
+@startuml relay
+hide circle
+hide empty members
+
+namespace Relay {
+  interface Connection<TNode> {
+    +pageInfo: PageInfo!
+    +edges: [Edge<TNode>!]!
+  }
+  Connection --> Edge
+  Connection --> PageInfo
+  class PageInfo {
+    +endCursor: String!
+    +hasNextPage: Boolean!
+    +hasPreviousPage: Boolean!
+  }
+  interface Edge<TNode> {
+    +node: TNode!
+    +cursor: String!
+  }
+}
+
+@enduml
