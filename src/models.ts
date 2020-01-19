@@ -104,6 +104,10 @@ export interface CommitSpec {
     commit: GitObjectID
 }
 
+export interface RevisionSpec {
+    revision: string
+}
+
 export interface FileSpec {
     file: string
 }

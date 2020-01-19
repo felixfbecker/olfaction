@@ -11,7 +11,7 @@ $body = (@{
             repositories {
                 edges {
                     node {
-                        commits(grep: $messagePattern) {
+                        commits(messagePattern: $messagePattern) {
                             edges {
                                 node {
                                     oid

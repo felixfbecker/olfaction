@@ -16,7 +16,7 @@ import {
 } from 'graphql'
 import graphQLHTTPServer, { OptionsData } from 'express-graphql'
 import * as pg from 'pg'
-import { listRepositories, validateRepository, validateCommit, validateObjectID } from '../git'
+import { listRepositories, validateRepository, validateCommit, validateObjectID, GitLogFilters } from '../git'
 import sql from 'sql-template-strings'
 import { Loaders, createLoaders, ForwardConnectionArguments } from '../loaders'
 import {
@@ -395,20 +395,24 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             commits: {
                 args: {
                     ...forwardConnectionArgs,
-                    grep: {
+                    messagePattern: {
                         type: GraphQLString,
                         description:
                             'Limit the commits to ones with log message that matches the specified pattern (regular expression).' +
                             "The pattern supports Git's extended regular expression syntax.",
                     },
-                    revisionRange: {
+                    revision: {
                         type: GraphQLString,
                         defaultValue: 'HEAD',
-                        description:
-                            'Show only commits in the specified revision range. ' +
-                            'When not specified, it defaults to `HEAD` (i.e. the whole history leading to the current commit). ' +
-                            '`origin..HEAD` specifies all the commits reachable from the current commit (i.e. `HEAD`), but not from `origin`. ' +
-                            'See https://git-scm.com/docs/gitrevisions#_specifying_revisions',
+                        description: 'The revision to start at (e.g. a commit, a branch, a tag, etc).',
+                    },
+                    since: {
+                        type: GraphQLString,
+                        description: 'Show commits more recent than a specific date.',
+                    },
+                    until: {
+                        type: GraphQLString,
+                        description: 'Show commits older than a specific date.',
                     },
                 },
                 type: GraphQLNonNull(CommitConnectionType),
@@ -520,7 +524,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         constructor(public name: string) {}
 
         async commits(
-            args: ForwardConnectionArguments & { grep?: string; revisionRange?: string },
+            args: ForwardConnectionArguments & GitLogFilters,
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
             const connection = await loaders.commit.forRepository.load({

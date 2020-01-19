@@ -495,16 +495,22 @@ type Repository {
     pattern (regular expression).The pattern supports Git's extended regular
     expression syntax.
     """
-    grep: String
+    messagePattern: String
 
     """
-    Show only commits in the specified revision range. When not specified, it
-    defaults to `HEAD` (i.e. the whole history leading to the current commit).
-    `origin..HEAD` specifies all the commits reachable from the current commit
-    (i.e. `HEAD`), but not from `origin`. See
-    https://git-scm.com/docs/gitrevisions#_specifying_revisions
+    The revision to start at (e.g. a commit, a branch, a tag, etc).
     """
-    revisionRange: String = "HEAD"
+    revision: String = "HEAD"
+
+    """
+    Show commits more recent than a specific date.
+    """
+    since: String
+
+    """
+    Show commits older than a specific date.
+    """
+    until: String
   ): CommitConnection!
   commit(oid: GitObjectID!): Commit
   codeSmellLifespans(after: String, first: Int, kind: String): CodeSmellLifeSpanConnection!

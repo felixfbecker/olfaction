@@ -52,7 +52,7 @@ export interface Loaders {
 
         /** Loads the existing commit SHAs in a repository */
         forRepository: DataLoader<
-            RepoSpec & ForwardConnectionArguments & { grep?: string; revisionRange?: string },
+            RepoSpec & ForwardConnectionArguments & git.GitLogFilters,
             Connection<Commit>
         >
     }
@@ -211,7 +211,7 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         group by input."index"
                         order by input."index"
                     `)
-                    assert.equal(result.rows.length, specs.length, 'Expected length to be the same')
+                    assert.strictEqual(result.rows.length, specs.length, 'Expected length to be the same')
                     return result.rows.map(
                         ({ codeSmells }, i): Connection<CodeSmell> => {
                             const spec = specs[i]
@@ -219,12 +219,16 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                                 codeSmells = []
                             }
                             for (const codeSmell of codeSmells) {
-                                assert.equal(
+                                assert.strictEqual(
                                     codeSmell.lifespanObject.repository,
                                     spec.repository,
                                     'Expected repository to equal input spec'
                                 )
-                                assert.equal(codeSmell.commit, spec.commit, 'Expected commit to equal input')
+                                assert.strictEqual(
+                                    codeSmell.commit,
+                                    spec.commit,
+                                    'Expected commit to equal input'
+                                )
                                 loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
                                 loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
                                 loaders.codeSmellLifespan.byId.prime(
@@ -438,12 +442,17 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             forRepository: new DataLoader(
                 logDuration('loaders.commit.forRepository', async specs =>
                     Promise.all(
-                        specs.map(async ({ repository, first, after, grep, revisionRange }) => {
+                        specs.map(async ({ repository, first, after, startRevision, ...filterOptions }) => {
                             try {
                                 const cursor =
                                     (after && parseCursor<Commit>(after, new Set(['oid']))) || undefined
                                 const commits = await git
-                                    .log({ repository, commit: cursor?.value, grep, revisionRange, repoRoot })
+                                    .log({
+                                        repoRoot,
+                                        repository,
+                                        startRevision: cursor?.value ?? startRevision,
+                                        ...filterOptions,
+                                    })
                                     .tap((commit: Commit) =>
                                         loaders.commit.bySha.prime({ repository, commit: commit.oid }, commit)
                                     )

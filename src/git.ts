@@ -13,8 +13,9 @@ import {
     Commit,
     CombinedFileDifference,
     ChangeKind,
+    RevisionSpec,
 } from './models'
-import { UnknownRepositoryError, UnknownCommitError } from './errors'
+import { UnknownRepositoryError, UnknownCommitError, UnknownRevisionError } from './errors'
 import { take, filter } from 'ix/asynciterable/pipe/index'
 import { sortBy } from 'lodash'
 import { fromNodeStream } from 'ix'
@@ -341,23 +342,47 @@ export function listRepositories({ repoRoot }: RepoRootSpec): Promise<string[]> 
     return fs.readdir(repoRoot)
 }
 
+export interface GitLogFilters {
+    /** The revision to start walking the history at. */
+    startRevision?: string
+
+    /** Limit the commits output to ones with log message that matches the specified pattern (regular expression). */
+    messagePattern?: string
+
+    /** Show commits more recent than a specific date. */
+    since?: string
+
+    /** Show commits older than a specific date. */
+    until?: string
+}
+
 export const log = ({
     repoRoot,
     repository,
-    revisionRange = 'HEAD',
-    grep,
-}: RepoRootSpec & RepoSpec & { grep?: string; revisionRange?: string }): AsyncIterableX<Commit> => {
+    startRevision = 'HEAD',
+    messagePattern,
+    since,
+    until,
+}: RepoRootSpec & RepoSpec & GitLogFilters): AsyncIterableX<Commit> => {
+    if (startRevision.includes('..')) {
+        throw new Error(`Start revision cannot be a revision range: ${startRevision}`)
+    }
+    const cwd = path.join(repoRoot, repository)
     const gitProcess = exec(
         'git',
         [
             'log',
             '-z',
             `--format=${commitFormat}`,
-            ...(grep ? [`--grep=${grep}`, '--extended-regexp', '--regexp-ignore-case'] : []),
-            revisionRange,
+            ...(messagePattern
+                ? [`--messagePattern=${messagePattern}`, '--extended-regexp', '--regexp-ignore-case']
+                : []),
+            ...(since ? [`--since=${since}`] : []),
+            ...(until ? [`--until=${until}`] : []),
+            startRevision,
             '--',
         ],
-        { cwd: path.join(repoRoot, repository) }
+        { cwd }
     )
     return AsyncIterableX.from(gitProcess.stdout!)
         .catchWith<Buffer>(err => {
@@ -368,7 +393,10 @@ export const log = ({
                 throw new UnknownRepositoryError({ repository })
             }
             if (err.exitCode === 128 && err.stderr?.startsWith('fatal: bad object')) {
-                throw new UnknownCommitError({ repository, commit })
+                throw new UnknownCommitError({ repository, commit: startRevision })
+            }
+            if (err.exitCode === 128 && err.stderr?.startsWith('fatal: bad revision')) {
+                throw new UnknownRevisionError({ repository, revision: startRevision })
             }
             throw err
         })
