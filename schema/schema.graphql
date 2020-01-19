@@ -138,12 +138,77 @@ type CodeSmellLifeSpanEdge {
   cursor: String!
 }
 
+"""
+The difference between two versions of a file in [Git's default combined diff
+format](https://git-scm.com/docs/git-diff#_combined_diff_format).This format is
+used to represent a combined diff for comparisons with potentially multiple base
+revisions, e.g. to compare a file in a commit to its parents.It will only list
+files that were modified from all base revisions.
+"""
+type CombinedFileDifference {
+  """
+  For each base revision, the change kind git detected comparing to that revision.
+  """
+  changeKinds: [FileChangeKind!]!
+
+  """
+  The version of the file at the head revision. null if the file no longer exists in the head revision.
+  """
+  headFile: File
+
+  """
+  For each base revision, the file in that revision. Will contain null if that commit did not contain the file.
+  """
+  baseFiles: [File]!
+}
+
+"""
+A connection to a list of items.
+"""
+type CombinedFileDifferenceConnection {
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+
+  """
+  A list of edges.
+  """
+  edges: [CombinedFileDifferenceEdge]
+}
+
+"""
+An edge in a connection.
+"""
+type CombinedFileDifferenceEdge {
+  """
+  The item at the end of the edge
+  """
+  node: CombinedFileDifference
+
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
+}
+
+"""
+A git commit object.
+"""
 type Commit {
   sha: String!
   message: String!
+  subject: String!
   author: Signature!
   committer: Signature!
   parents: [Commit!]!
+
+  """
+  The file differences between this commit and its parent in git's combined diff
+  format. This list contains one element for each file that is different in this
+  commit when compared to one of its parents.
+  """
+  combinedFileDifferences(after: String, first: Int): CombinedFileDifferenceConnection!
 
   """
   The files that existed at this commit in the repository
@@ -195,7 +260,25 @@ type File {
     encoding: String
   ): String
   linesCount: Int
+
+  """
+  The commit this file exists at.
+  """
   commit: Commit!
+
+  """
+  The code smells that exist in this file.
+  """
+  codeSmells(after: String, first: Int): CodeSmellConnection!
+}
+
+enum FileChangeKind {
+  ADDED
+  COPIED
+  DELETED
+  MODIFIED
+  RENAMED
+  TYPE_CHANGED
 }
 
 """
@@ -351,7 +434,9 @@ type Repository {
     first: Int
 
     """
-    Limit the commits to ones with log message that matches the specified pattern (regular expression).
+    Limit the commits to ones with log message that matches the specified
+    pattern (regular expression).The pattern supports Git's extended regular
+    expression syntax.
     """
     grep: String
   ): CommitConnection!

@@ -13,6 +13,7 @@ import {
     CodeSmellLifespanSpec,
     Commit,
     CodeSmellSpec,
+    CombinedFileDifference,
 } from './models'
 import { NullFields, base64encode, parseCursor, isNullArray, asError, logDuration } from './util'
 import assert from 'assert'
@@ -31,7 +32,10 @@ export interface Loaders {
         byOrdinal: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>
         /** Loads the entire life span of a given lifespan ID. */
         forLifespan: DataLoader<CodeSmellLifespanSpec & ForwardConnectionArguments, Connection<CodeSmell>>
-        forCommit: DataLoader<RepoSpec & CommitSpec & ForwardConnectionArguments, Connection<CodeSmell>>
+        forCommit: DataLoader<
+            RepoSpec & CommitSpec & Partial<FileSpec> & ForwardConnectionArguments,
+            Connection<CodeSmell>
+        >
     }
     codeSmellLifespan: {
         /** Loads a code smell lifespan by ID. */
@@ -54,11 +58,15 @@ export interface Loaders {
     }
 
     files: DataLoader<RepoSpec & CommitSpec, File[]>
+    combinedFileDifference: {
+        forCommit: DataLoader<RepoSpec & CommitSpec, CombinedFileDifference[]>
+    }
     fileContent: DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>
 }
 
 const repoAtCommitCacheKeyFn = ({ repository, commit }: RepoSpec & CommitSpec): string =>
     `${repository}@${commit}`
+const fileKeyFn = ({ file }: Partial<FileSpec>): string => (file ? `#${file}` : '')
 const connectionArgsKeyFn = ({ first, after }: ForwardConnectionArguments): string => `*${after}+${first}`
 
 /**
@@ -89,6 +97,31 @@ const connectionFromOverfetchedResult = <T extends object>(
             hasNextPage: last(result) !== last(edges)?.node,
         },
     }
+}
+
+/**
+ * Run `mapper` for every group of commits, grouped by repository.
+ *
+ * @returns The results grouped by repository.
+ */
+async function mapCommitRepoSpecsGroupedByRepo<R>(
+    specs: (CommitSpec & RepoSpec)[],
+    mapper: (value: RepoSpec & { commits: IterableX<CommitSpec> }) => Promise<R>
+): Promise<ReadonlyMap<RepoSpec['repository'], R | Error>> {
+    const byRepo = IterableX.from(specs).groupBy(spec => spec.repository)
+    const resultsByRepo = new Map(
+        await mapPromise(
+            byRepo,
+            async commitsForRepo =>
+                [
+                    commitsForRepo.key,
+                    await mapper({ repository: commitsForRepo.key, commits: commitsForRepo }).catch(err =>
+                        asError(err)
+                    ),
+                ] as const
+        )
+    )
+    return resultsByRepo
 }
 
 export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }): Loaders => {
@@ -139,30 +172,37 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                 { cacheKeyFn: ({ lifespan, ordinal }) => `${lifespan}#${ordinal}` }
             ),
 
-            forCommit: new DataLoader<
-                RepoSpec & CommitSpec & ForwardConnectionArguments,
-                Connection<CodeSmell>
-            >(
+            forCommit: new DataLoader(
                 logDuration('loaders.codeSmell.forCommit', async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ repository, commit, first, after }, index) => {
+                        specs.map(({ repository, commit, file, first, after }, index) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
                                 (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
-                            return { index, repository, commit, first, after: cursor?.value }
+                            return {
+                                index,
+                                repository,
+                                commit,
+                                fileQuery: file ? [{ file }] : null,
+                                first,
+                                after: cursor?.value,
+                            }
                         })
                     )
                     const result = await db.query<{
                         codeSmells: [null] | (CodeSmell & { lifespanObject: CodeSmellLifespan })[]
                     }>(sql`
                         select input."index", array_agg(to_jsonb(c)) as "codeSmells"
-                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "first" int, "after" uuid)
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "fileQuery" jsonb, "first" int, "after" uuid)
                         left join lateral (
                             select code_smells.*, to_jsonb(code_smell_lifespans) as "lifespanObject"
                             from code_smells
                             inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
                             -- required filters:
-                            where input.repository = code_smell_lifespans.repository and input.commit = code_smells.commit
+                            where code_smell_lifespans.repository = input.repository
+                            and code_smells.commit = input.commit
+                            -- optional filters:
+                            and (jsonb_typeof(input."fileQuery") = 'null' or code_smells.locations @> input."fileQuery")
                             -- pagination:
                             and (input.after is null or code_smells.id >= input.after) -- include one before to know whether there is a previous page
                             order by id asc
@@ -196,7 +236,10 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                         }
                     )
                 }),
-                { cacheKeyFn: args => repoAtCommitCacheKeyFn(args) + connectionArgsKeyFn(args) }
+                {
+                    cacheKeyFn: args =>
+                        repoAtCommitCacheKeyFn(args) + fileKeyFn(args) + connectionArgsKeyFn(args),
+                }
             ),
 
             forLifespan: new DataLoader<
@@ -320,6 +363,36 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
             { cacheKeyFn: repoAtCommitCacheKeyFn }
         ),
 
+        combinedFileDifference: {
+            forCommit: new DataLoader<RepoSpec & CommitSpec, CombinedFileDifference[]>(
+                async specs => {
+                    const commitsByRepo = await mapCommitRepoSpecsGroupedByRepo(
+                        specs,
+                        ({ repository, commits }) =>
+                            git
+                                .getCombinedCommitDifference({
+                                    repoRoot,
+                                    repository,
+                                    commitShas: commits.map(c => c.commit),
+                                })
+                                .catch(err => asError(err))
+                    )
+                    return specs.map(spec => {
+                        const repoCommits = commitsByRepo.get(spec.repository)
+                        if (repoCommits instanceof Error) {
+                            return repoCommits
+                        }
+                        const commit = repoCommits?.get(spec.commit)
+                        if (!commit) {
+                            return new UnknownCommitError(spec)
+                        }
+                        return commit
+                    })
+                },
+                { cacheKeyFn: repoAtCommitCacheKeyFn }
+            ),
+        },
+
         fileContent: new DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>(
             specs =>
                 Promise.all(
@@ -328,33 +401,26 @@ export const createLoaders = ({ db, repoRoot }: { db: Client; repoRoot: string }
                     )
                 ),
             {
-                cacheKeyFn: ({ file, ...spec }: RepoSpec & CommitSpec & FileSpec) =>
-                    repoAtCommitCacheKeyFn(spec) + `#${file}`,
+                cacheKeyFn: (spec: RepoSpec & CommitSpec & FileSpec) =>
+                    repoAtCommitCacheKeyFn(spec) + fileKeyFn(spec),
             }
         ),
 
         commit: {
             bySha: new DataLoader<RepoSpec & CommitSpec, Commit>(
-                async commitSpecs => {
-                    const byRepo = groupBy(commitSpecs, commit => commit.repository)
-                    const commitsByRepo = new Map(
-                        await Promise.all(
-                            Object.entries(byRepo).map(
-                                async ([repository, commits]) =>
-                                    [
-                                        repository,
-                                        await git
-                                            .getCommits({
-                                                repoRoot,
-                                                repository,
-                                                commitShas: commits.map(c => c.commit),
-                                            })
-                                            .catch(err => asError(err)),
-                                    ] as const
-                            )
-                        )
+                async specs => {
+                    const commitsByRepo = await mapCommitRepoSpecsGroupedByRepo(
+                        specs,
+                        ({ repository, commits }) =>
+                            git
+                                .getCommits({
+                                    repoRoot,
+                                    repository,
+                                    commitShas: commits.map(c => c.commit),
+                                })
+                                .catch(err => asError(err))
                     )
-                    return commitSpecs.map(spec => {
+                    return specs.map(spec => {
                         const repoCommits = commitsByRepo.get(spec.repository)
                         if (repoCommits instanceof Error) {
                             return repoCommits

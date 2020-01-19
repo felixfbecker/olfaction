@@ -10,6 +10,7 @@ import {
     GraphQLInt,
     GraphQLInputObjectType,
     execute,
+    GraphQLEnumType,
 } from 'graphql'
 import graphQLHTTPServer, { OptionsData } from 'express-graphql'
 import * as pg from 'pg'
@@ -30,6 +31,7 @@ import {
     Signature,
     RepoRootSpec,
     CodeSmellInput,
+    ChangeKind,
 } from '../models'
 import { transaction, mapConnectionNodes, logDuration } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
@@ -62,14 +64,96 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
         },
     })
 
+    var FileChangeKindEnum = new GraphQLEnumType({
+        name: 'FileChangeKind',
+        values: {
+            ADDED: { value: ChangeKind.Added },
+            COPIED: { value: ChangeKind.Copied },
+            DELETED: { value: ChangeKind.Deleted },
+            MODIFIED: { value: ChangeKind.Modified },
+            RENAMED: { value: ChangeKind.Renamed },
+            TYPE_CHANGED: { value: ChangeKind.TypeChanged },
+        },
+    })
+
+    // FUTURE:
+    // var FileDifferenceType = new GraphQLObjectType({
+    //     name: 'FileDifference',
+    //     description: 'The difference of a file between two revisions.',
+    //     fields: () => ({
+    //         changeKind: {
+    //             description: 'The change kind git detected comparing to the base revision.',
+    //             type: GraphQLNonNull(FileChangeKindEnum),
+    //         },
+    //         headFile: {
+    //             type: FileType,
+    //             description:
+    //                 'The version of the file at the head revision. null if the file no longer exists in the head revision.',
+    //         },
+    //         baseFile: {
+    //             type: FileType,
+    //             description:
+    //                 'The version of the file in the base revision. null if that commit did not contain the file.',
+    //         },
+    //         // FUTURE
+    //         // hunks: {}
+    //         // patch: { type: GraphQLNonNull(GraphQLString) }
+    //     }),
+    // })
+
+    var CombinedFileDifferenceType = new GraphQLObjectType({
+        name: 'CombinedFileDifference',
+        description:
+            "The difference between two versions of a file in [Git's default combined diff format](https://git-scm.com/docs/git-diff#_combined_diff_format)." +
+            'This format is used to represent a combined diff for comparisons with potentially multiple base revisions, e.g. to compare a file in a commit to its parents.' +
+            'It will only list files that were modified from all base revisions.',
+        fields: () => ({
+            changeKinds: {
+                description:
+                    'For each base revision, the change kind git detected comparing to that revision.',
+                type: GraphQLNonNull(GraphQLList(GraphQLNonNull(FileChangeKindEnum))),
+            },
+            headFile: {
+                type: FileType,
+                description:
+                    'The version of the file at the head revision. null if the file no longer exists in the head revision.',
+            },
+            baseFiles: {
+                type: GraphQLNonNull(GraphQLList(FileType)),
+                description:
+                    'For each base revision, the file in that revision. Will contain null if that commit did not contain the file.',
+            },
+        }),
+    })
+    var { connectionType: CombinedFileDifferenceConnectionType } = connectionDefinitions({
+        nodeType: CombinedFileDifferenceType,
+    })
+
     var CommitType: GraphQLObjectType = new GraphQLObjectType<Commit>({
         name: 'Commit',
+        description: 'A git commit object.',
         fields: () => ({
             sha: { type: GraphQLNonNull(GraphQLString) },
             message: { type: GraphQLNonNull(GraphQLString) },
+            subject: { type: GraphQLNonNull(GraphQLString) },
             author: { type: GraphQLNonNull(SignatureType) },
             committer: { type: GraphQLNonNull(SignatureType) },
             parents: { type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CommitType))) },
+            combinedFileDifferences: {
+                description:
+                    "The file differences between this commit and its parents in [Git's combined diff format](https://git-scm.com/docs/git-diff-tree#_combined_diff_format)." +
+                    'This list contains one element for each file that is different in this commit when compared to one of its parents.',
+                args: forwardConnectionArgs,
+                type: GraphQLNonNull(CombinedFileDifferenceConnectionType),
+            },
+            // FUTURE
+            // fileDifferences: {
+            //     description:
+            //         'The file differences for each parent commit, like git show -m. This list contains one element for each parent of the commit, with the file differences when comparing to that commit.',
+            //     type: GraphQLNonNull(
+            //         GraphQLList(GraphQLNonNull(GraphQLList(GraphQLNonNull(FileDifferenceType))))
+            //     ),
+            // },
             files: {
                 args: forwardConnectionArgs,
                 type: GraphQLNonNull(FileConnectionType),
@@ -85,7 +169,7 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
 
     var FileType = new GraphQLObjectType<File>({
         name: 'File',
-        fields: {
+        fields: () => ({
             path: { type: GraphQLNonNull(GraphQLString) },
             content: {
                 type: GraphQLString,
@@ -94,8 +178,16 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                     'The file content from the git repository. null if the repository was not uploaded.',
             },
             linesCount: { type: GraphQLInt },
-            commit: { type: GraphQLNonNull(CommitType) },
-        },
+            commit: {
+                description: 'The commit this file exists at.',
+                type: GraphQLNonNull(CommitType),
+            },
+            codeSmells: {
+                description: 'The code smells that exist in this file.',
+                args: forwardConnectionArgs,
+                type: GraphQLNonNull(CodeSmellConnectionType),
+            },
+        }),
     })
     var { connectionType: FileConnectionType } = connectionDefinitions({ nodeType: FileType })
 
@@ -244,7 +336,8 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
                     grep: {
                         type: GraphQLString,
                         description:
-                            'Limit the commits to ones with log message that matches the specified pattern (regular expression).',
+                            'Limit the commits to ones with log message that matches the specified pattern (regular expression).' +
+                            "The pattern supports Git's extended regular expression syntax.",
                     },
                 },
                 type: GraphQLNonNull(CommitConnectionType),
@@ -514,6 +607,33 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             ...commit,
             repository: () => new RepositoryResolver(repository),
             subject: (): string => commit.message.split('\n', 1)[0],
+            combinedFileDifferences: async (args: ForwardConnectionArguments, { loaders }: Context) => {
+                const fileDifferences = await loaders.combinedFileDifference.forCommit.load(spec)
+                return connectionFromArray(
+                    fileDifferences.map(difference => ({
+                        changeKinds: difference.changeKinds,
+                        headFile: () =>
+                            difference.headPath && new FileResolver({ ...spec, file: difference.headPath }),
+                        baseFiles: () =>
+                            difference.basePaths.map(
+                                basePath => basePath && new FileResolver({ ...spec, file: basePath })
+                            ),
+                    })),
+                    args
+                )
+            },
+            // fileDifferences: async (args: {}, { loaders }: Context) => {
+            //     const fileDifferences = await loaders.fileDifference.forCommit.load(spec)
+            //     return fileDifferences.map(differencesToParent =>
+            //         differencesToParent.map(difference => ({
+            //             changeKind: difference.changeKind,
+            //             headFile: () =>
+            //                 difference.newPath && new FileResolver({ ...spec, file: difference.headPath }),
+            //             baseFile: () =>
+            //                 difference.oldPath && new FileResolver({ ...spec, file: difference.basePath }),
+            //         }))
+            //     )
+            // },
             async codeSmells(
                 args: ForwardConnectionArguments,
                 { loaders }: Context
@@ -554,6 +674,11 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
             return createCommitResolver(this.spec, commit)
         }
 
+        async codeSmells(args: ForwardConnectionArguments, { loaders }: Context) {
+            const codeSmells = await loaders.codeSmell.forCommit.load({ ...this.spec, ...args })
+            return codeSmells
+        }
+
         async linesCount(args: {}, { loaders }: Context) {
             const buffer = await loaders.fileContent.load(this.spec)
             const decoder = new TextDecoder(chardet.detect(buffer) || undefined)
@@ -563,7 +688,8 @@ export function createGraphQLHandler({ db, repoRoot }: { db: pg.Client; repoRoot
     }
 
     const query = {
-        repository({ name }: { name: string }) {
+        async repository({ name }: { name: string }) {
+            await validateRepository({ repository: name, repoRoot })
             return new RepositoryResolver(name)
         },
         async repositories(args: ForwardConnectionArguments): Promise<Connection<RepositoryResolver>> {

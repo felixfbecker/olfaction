@@ -1,23 +1,33 @@
 # 3. Are files that contain at least one code smell changed more often than files without code smells?
 
+[CmdletBinding()]
 param(
+    [Uri] $ServerUrl = [Uri]::new("http://localhost:4040")
 )
 
 $body = (@{
     query = '
-        {
+        query($messagePattern: String!) {
             repositories {
                 edges {
                     node {
-                        commits(grep: "(closes?|fix(es)?\s+#?\d+") {
+                        commits(grep: $messagePattern) {
                             edges {
                                 node {
-                                    affectedFiles {
-                                        codeSmells {
-                                            # Query 1 to check if there is at least one code smell
-                                            edges(first: 1) {
-                                                node {
-                                                    id
+                                    sha
+                                    combinedFileDifferences {
+                                        edges {
+                                            node {
+                                                # Query file BEFORE the change
+                                                baseFiles {
+                                                    codeSmells(first: 1) {
+                                                        # Query 1 to check if there is at least one code smell
+                                                        edges {
+                                                            node {
+                                                                id
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -30,23 +40,35 @@ $body = (@{
             }
         }
     '
-    variables = @{}
+    variables = @{
+        # Only consider commits that reference an issue
+        messagePattern = "(fix(es)?|clos(es)?|issue)\s*#[0-9]+"
+    }
 } | ConvertTo-Json)
 
-Invoke-RestMethod -Body $body |
-    ForEach-Object { $_.repositories.edges } |
+$result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json'
+if ($result.PSObject.Properties['errors'] -and $result.errors) {
+    throw ($result.errors | ConvertTo-Json -Depth 100)
+}
+Write-Verbose "Got result"
+$result.data.repositories.edges |
     ForEach-Object { $_.node.commits.edges } |
     ForEach-Object {
-        $groupedByHasCodeSmell = $_.affectedFiles | Group-Object -Property { $_.codeSmells.edges.Length -gt 0 }
-        [pscustomobject]@{
-            affectedFilesWithCodeSmell = $groupedByHasCodeSmell[$true]
-            affectedFilesWithoutCodeSmell = $groupedByHasCodeSmell[$false]
+        $commit = $_.node
+        # We consider any file change to a file that had a code smell in one of the commit's parents
+        $grouped = $commit.combinedFileDifferences.edges |
+            # File needs to have at least one base file
+            Where-Object { $_.node.baseFiles } |
+            Group-Object -AsHashTable -Property {
+                @($_.node.baseFiles | ForEach-Object { $_.codeSmells.edges }).Count -gt 0
+            }
+        if ($grouped) {
+            [pscustomobject]@{
+                Commit = $commit.sha
+                FileChangesWithCodeSmell    = if ($grouped.ContainsKey($true)) { $grouped[$true].Count } else { 0 }
+                FileChangesWithoutCodeSmell = if ($grouped.ContainsKey($false)) { $grouped[$false].Count } else { 0 }
+            }
         }
     } |
-    ForEach-Object {
-        [pscustomobject]@{
-            affectedFilesWithCodeSmell = $_.affectedFilesWithCodeSmell.Count
-            affectedFilesWithoutCodeSmell = $_.affectedFilesWithoutCodeSmells.Count
-        }
-    } |
-    Measure-Object -AllStats -Property affectedFiles*
+    Measure-Object -AllStats -Property FileChanges* |
+    Select-Object -Property Property,Sum,Average,StandardDeviation,Minimum,Maximum

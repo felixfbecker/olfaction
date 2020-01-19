@@ -2,7 +2,18 @@ import * as path from 'path'
 import exec from 'execa'
 import * as fs from 'mz/fs'
 import { AbortError } from './abort'
-import { RepoSpec, CommitSpec, SHA, FileSpec, RepoRootSpec, CodeSmell, File, Commit } from './models'
+import {
+    RepoSpec,
+    CommitSpec,
+    SHA,
+    FileSpec,
+    RepoRootSpec,
+    CodeSmell,
+    File,
+    Commit,
+    CombinedFileDifference,
+    ChangeKind,
+} from './models'
 import { UnknownRepositoryError, UnknownCommitError } from './errors'
 import { take, filter } from 'ix/asynciterable/pipe/index'
 import { sortBy } from 'lodash'
@@ -10,6 +21,7 @@ import { fromNodeStream } from 'ix'
 import { AsyncIterableX } from 'ix/asynciterable'
 import { keyBy } from './util'
 import { IterableX } from 'ix/iterable'
+import assert from 'assert'
 
 export async function filterValidCommits({
     repository,
@@ -18,12 +30,15 @@ export async function filterValidCommits({
 }: {
     repoRoot: string
     repository: string
-    commitShas: SHA[]
+    commitShas: Iterable<SHA>
 }): Promise<SHA[]> {
     try {
         const { stdout } = await exec('git', ['rev-list', '--ignore-missing', '--no-walk', '--stdin', '--'], {
             cwd: path.join(repoRoot, repository),
-            input: commitShas.filter(c => /[a-f0-9]{40}/.test(c)).join('\n'),
+            input: IterableX.from(commitShas)
+                .filter(c => /[a-f0-9]{40}/.test(c))
+                .map(commitSha => commitSha + '\n')
+                .toNodeStream(),
         })
         return stdout.split('\n').filter(Boolean)
     } catch (err) {
@@ -127,7 +142,7 @@ export async function getCommits({
 }: {
     repoRoot: string
     repository: string
-    commitShas: SHA[]
+    commitShas: Iterable<SHA>
 }): Promise<ReadonlyMap<SHA, Commit>> {
     // Bulk-validate the commits first, because git show fails hard on bad revisions
     const filteredCommitShas = await filterValidCommits({ repoRoot, repository, commitShas })
@@ -149,6 +164,84 @@ export async function getCommits({
         const commits = IterableX.from(stdout.split('\0')).map(parseCommit)
         const commitsBySha = keyBy(commits, c => c.sha)
         return commitsBySha
+    } catch (err) {
+        if (err.code === 'ENOENT') {
+            throw new UnknownRepositoryError({ repository })
+        }
+        throw err
+    }
+}
+
+const commitChangesFormat = ['%x00', FormatTokens.commitSha].join('')
+export async function getCombinedCommitDifference({
+    repoRoot,
+    repository,
+    commitShas,
+}: {
+    repoRoot: string
+    repository: string
+    commitShas: IterableX<SHA>
+}): Promise<ReadonlyMap<SHA, CombinedFileDifference[]>> {
+    // Bulk-validate the commits first, because git show fails hard on bad revisions
+    const filteredCommitShas = await filterValidCommits({ repoRoot, repository, commitShas })
+    try {
+        const { stdout } = await exec(
+            'git',
+            [
+                'show',
+                '--no-decorate',
+                '--no-color',
+                '--name-status',
+                '--find-renames',
+                '--find-copies',
+                '--cc',
+                '--combined-all-paths', // List the file path from each parent
+                `--format=${commitChangesFormat}`,
+                ...filteredCommitShas,
+                '--',
+            ],
+            { cwd: path.join(repoRoot, repository) }
+        )
+        const map = new Map<SHA, CombinedFileDifference[]>()
+        const commitsWithChanges = IterableX.from(stdout.split('\0'))
+            .filter(line => line !== '')
+            .map(commitChunk => {
+                const [sha, ...fileLines] = commitChunk.split('\n')
+                const changes = fileLines
+                    .filter(fileLine => fileLine !== '')
+                    .map(fileLine => {
+                        const [gitChangeKinds, gitHeadPath, ...gitBasePaths] = fileLine.split('\t')
+                        const changeKinds = gitChangeKinds
+                            // Filter out rename, copy, modified similarity scores
+                            .replace(/\d/g, '')
+                            .split('') as ChangeKind[]
+                        let headPath: string | null = gitHeadPath
+                        // Git only returns base paths for merge commits, renames and copies
+                        // If none is given, its the same as the head paths
+                        const basePaths: (string | null)[] =
+                            gitBasePaths.length > 0 ? gitBasePaths : [headPath]
+                        for (const [baseIndex, changeKind] of changeKinds.entries()) {
+                            switch (changeKind) {
+                                case ChangeKind.Added:
+                                    // If the file was added compared to this base,
+                                    // it didn't exist in the base and the path should be null
+                                    basePaths[baseIndex] = null
+                                    break
+                                case ChangeKind.Deleted:
+                                    // If the file was deleted compared to any of the bases,
+                                    // it doesn't exist in the head and the path should be null
+                                    headPath = null
+                                    break
+                            }
+                        }
+                        return { changeKinds, headPath, basePaths }
+                    })
+                return { sha, changes }
+            })
+        for (const { sha, changes } of commitsWithChanges) {
+            map.set(sha, changes)
+        }
+        return map
     } catch (err) {
         if (err.code === 'ENOENT') {
             throw new UnknownRepositoryError({ repository })
@@ -251,7 +344,14 @@ export const log = ({
 }: RepoRootSpec & RepoSpec & Partial<CommitSpec> & { grep?: string }): AsyncIterableX<Commit> => {
     const gitProcess = exec(
         'git',
-        ['log', '-z', `--format=${commitFormat}`, ...(grep ? [`--grep=${grep}`] : []), commit, '--'],
+        [
+            'log',
+            '-z',
+            `--format=${commitFormat}`,
+            ...(grep ? [`--grep=${grep}`, '--extended-regexp', '--regexp-ignore-case'] : []),
+            commit,
+            '--',
+        ],
         { cwd: path.join(repoRoot, repository) }
     )
     return AsyncIterableX.from(gitProcess.stdout!)

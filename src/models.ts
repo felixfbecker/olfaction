@@ -36,6 +36,37 @@ export interface Commit {
     message: string
 }
 
+export enum ChangeKind {
+    Added = 'A',
+    Copied = 'C',
+    Modified = 'M',
+    Deleted = 'D',
+    Renamed = 'R',
+    TypeChanged = 'T',
+}
+
+/**
+ * A file difference as in [Git's combined diff format](https://git-scm.com/docs/git-diff#_combined_diff_format).
+ */
+export interface CombinedFileDifference {
+    /**
+     * The kind of change detected for each base revision.
+     */
+    changeKinds: ChangeKind[]
+
+    /**
+     * The file paths at the base revisions.
+     * Contains `null` if the file does not exist in that base revision.
+     */
+    basePaths: (string | null)[]
+
+    /**
+     * The file path at the head revision.
+     * `null` if the file does not exist in the head revision.
+     */
+    headPath: string | null
+}
+
 export interface CodeSmell {
     id: UUID
     message: string

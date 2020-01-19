@@ -21,12 +21,33 @@ class Commit {
   +sha: String!
   +committer: Signature!
   +author: Signature!
+  {method} +combinedFileDifferencees: Connection<CombinedFileDifference>!
+  {method} +codeSmells: Connection<CodeSmell>!
   {method} +files: Connection<File>!
-  {method} +changedFiles: Connection<File>!
 }
-Commit --> Signature
+Commit --> Signature : committed by >
+Commit --> Signature : authored by >
 Commit "1" *-- "0..*" CodeSmell
 Commit "1" *-- "0..*" File
+Commit "1" *-- "0..*" CombinedFileDifference
+
+class CombinedFileDifference {
+  +changeKinds: [FileChangeKind!]!
+  +headFile: File
+  +baseFiles: [File]!
+}
+CombinedFileDifference "0..*" -- "0..1" File : of >
+CombinedFileDifference "0..*" -- "0..*" File : compared to >
+CombinedFileDifference --> FileChangeKind : of >
+
+enum FileChangeKind {
+  ADDED
+  COPIED
+  DELETED
+  MODIFIED
+  RENAMED
+  TYPE_CHANGED
+}
 
 class Signature {
   +name: String!
@@ -42,22 +63,21 @@ class CodeSmell {
   +ordinal: Int!
   {method} +lifespan: CodeSmellLifespan!
 }
-CodeSmell "1..n" --> "0..n" Location
+CodeSmell "1..n" --> "0..n" Location : at >
 
 class Location {
   +file: File!
   +range: Range!
   +contents(encoding: String): String!
 }
-Location --> Range
-Location --> Range
-Location --> File
+Location --> File : in >
+Location --> Range : at >
 class Range {
   +start: Position!
   +end: Position!
 }
-Range --> Position
-Range --> Position
+Range --> Position : from >
+Range --> Position : to >
 class Position {
   +line: Int!
   +character: Int!
@@ -77,7 +97,9 @@ class File {
   +path: String!
   +linesCount: Int!
   +contents(encoding: String): String!
+  {method} +codeSmells: Connection<CodeSmell>!
 }
+File "1..*" *-- "0..*" CodeSmell : contains >
 
 namespace Relay {
   interface Connection<TNode> {
