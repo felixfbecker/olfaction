@@ -24,7 +24,14 @@ import {
     GitLogFilters,
 } from '../git'
 import sql from 'sql-template-strings'
-import { Loaders, createLoaders, ForwardConnectionArguments, KindFilter } from '../loaders'
+import {
+    Loaders,
+    createLoaders,
+    ForwardConnectionArguments,
+    KindFilter,
+    DirectoryFilter,
+    PathPatternFilter,
+} from '../loaders'
 import {
     Location,
     CodeSmell,
@@ -51,6 +58,10 @@ import * as path from 'path'
 import { UnknownCodeSmellError } from '../errors'
 
 type GraphQLArg<T> = T extends undefined ? Exclude<T, undefined> | null : T
+/**
+ * Ensures all properties use `null` instead of `undefined`, as GraphQL only
+ * knows `null`.
+ */
 type GraphQLArgs<T> = {
     [K in keyof T]: GraphQLArg<T[K]>
 }
@@ -190,13 +201,31 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             //     ),
             // },
             files: {
-                args: forwardConnectionArgs,
+                args: {
+                    ...forwardConnectionArgs,
+                    directory: {
+                        description: 'Return all files in a given directory and its subdirectories.',
+                        type: GraphQLString,
+                    },
+                    pathPattern: {
+                        description: 'Return only files that match the provided regular expression.',
+                        type: GraphQLString,
+                    },
+                },
                 type: GraphQLNonNull(FileConnectionType),
                 description: 'The files that existed at this commit in the repository',
             },
             codeSmells: {
                 type: GraphQLNonNull(CodeSmellConnectionType),
-                args: { ...kindFilterArg, ...forwardConnectionArgs },
+                args: {
+                    ...kindFilterArg,
+                    ...forwardConnectionArgs,
+                    pathPattern: {
+                        type: GraphQLString,
+                        description:
+                            'Only return code smells that affect a file matching the given path pattern (regular expression).',
+                    },
+                },
             },
         }),
     })
@@ -424,11 +453,15 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     },
                     since: {
                         type: GraphQLString,
-                        description: 'Show commits more recent than a specific date.',
+                        description: 'Return commits more recent than a specific date.',
                     },
                     until: {
                         type: GraphQLString,
-                        description: 'Show commits older than a specific date.',
+                        description: 'Return commits older than a specific date.',
+                    },
+                    path: {
+                        type: GraphQLString,
+                        description: 'Return only the history of the given directory or file.',
                     },
                 },
                 type: GraphQLNonNull(CommitConnectionType),
@@ -547,7 +580,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         constructor(public name: string) {}
 
         async commits(
-            args: ForwardConnectionArguments & GraphQLArgs<GitLogFilters>,
+            args: GraphQLArgs<ForwardConnectionArguments & GitLogFilters>,
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
             const connection = await loaders.commit.forRepository.load({
@@ -556,6 +589,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 startRevision: args.startRevision || undefined,
                 since: args.since || undefined,
                 until: args.until || undefined,
+                path: args.path || undefined,
                 repository: this.name,
             })
             return mapConnectionNodes(connection, node =>
@@ -569,7 +603,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         }
 
         async codeSmellLifespans(
-            { kind, ...args }: KindFilter & ForwardConnectionArguments,
+            { kind, ...args }: GraphQLArgs<KindFilter & ForwardConnectionArguments>,
             { loaders }: Context
         ): Promise<Connection<CodeSmellLifespanResolver>> {
             const connection = await loaders.codeSmellLifespan.forRepository.load({
@@ -751,21 +785,29 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             //     )
             // },
             async codeSmells(
-                args: ForwardConnectionArguments & KindFilter,
+                args: GraphQLArgs<ForwardConnectionArguments & KindFilter & PathPatternFilter>,
                 { loaders }: Context
             ): Promise<Connection<CodeSmellResolver>> {
                 const connection = await loaders.codeSmell.forCommit.load({ ...spec, ...args })
                 return mapConnectionNodes(connection, node => new CodeSmellResolver(node))
             },
             async files(
-                args: ForwardConnectionArguments,
+                {
+                    directory,
+                    pathPattern,
+                    ...connectionArgs
+                }: GraphQLArgs<ForwardConnectionArguments & DirectoryFilter & PathPatternFilter>,
                 { loaders }: Context
             ): Promise<Connection<FileResolver>> {
-                const files = await loaders.files.load({ repository, commit: commit.oid })
+                let files = await loaders.files.load({ repository, commit: commit.oid, directory })
+                if (pathPattern) {
+                    const regex = new RegExp(pathPattern, 'i')
+                    files = files.filter(file => regex.test(file.path))
+                }
 
                 return connectionFromArray(
                     files.map(file => new FileResolver({ ...spec, file: file.path })),
-                    args
+                    connectionArgs
                 )
             },
         }

@@ -218,7 +218,20 @@ type Commit {
   """
   The files that existed at this commit in the repository
   """
-  files(after: String, first: Int): FileConnection!
+  files(
+    after: String
+    first: Int
+
+    """
+    Return all files in a given directory and its subdirectories.
+    """
+    directory: String
+
+    """
+    Return only files that match the provided regular expression.
+    """
+    pathPattern: String
+  ): FileConnection!
   codeSmells(
     """
     Only return code smells with this kind.
@@ -226,6 +239,11 @@ type Commit {
     kind: String
     after: String
     first: Int
+
+    """
+    Only return code smells that affect a file matching the given path pattern (regular expression).
+    """
+    pathPattern: String
   ): CodeSmellConnection!
 }
 
@@ -527,14 +545,19 @@ type Repository {
     startRevision: String = "HEAD"
 
     """
-    Show commits more recent than a specific date.
+    Return commits more recent than a specific date.
     """
     since: String
 
     """
-    Show commits older than a specific date.
+    Return commits older than a specific date.
     """
     until: String
+
+    """
+    Return only the history of the given directory or file.
+    """
+    path: String
   ): CommitConnection!
   commit(oid: GitObjectID!): Commit
   codeSmellLifespans(

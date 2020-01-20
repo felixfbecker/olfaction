@@ -1,8 +1,7 @@
-import { Client } from 'pg'
 import DataLoader from 'dataloader'
 import sql from 'sql-template-strings'
 import * as git from './git'
-import { groupBy, last } from 'lodash'
+import { last } from 'lodash'
 import {
     CodeSmell,
     RepoSpec,
@@ -32,6 +31,14 @@ export interface KindFilter {
     kind: string | null
 }
 
+export interface DirectoryFilter {
+    directory: string | null
+}
+
+export interface PathPatternFilter {
+    pathPattern: string | null
+}
+
 export interface Loaders {
     codeSmell: {
         /** Loads a code smell by ID. */
@@ -40,7 +47,12 @@ export interface Loaders {
         /** Loads the entire life span of a given lifespan ID. */
         forLifespan: DataLoader<CodeSmellLifespanSpec & ForwardConnectionArguments, Connection<CodeSmell>>
         forCommit: DataLoader<
-            RepoSpec & CommitSpec & Partial<FileSpec> & KindFilter & ForwardConnectionArguments,
+            RepoSpec &
+                CommitSpec &
+                Partial<FileSpec> &
+                KindFilter &
+                PathPatternFilter &
+                ForwardConnectionArguments,
             Connection<CodeSmell>
         >
     }
@@ -64,7 +76,7 @@ export interface Loaders {
         >
     }
 
-    files: DataLoader<RepoSpec & CommitSpec, File[]>
+    files: DataLoader<RepoSpec & CommitSpec & DirectoryFilter, File[]>
     combinedFileDifference: {
         forCommit: DataLoader<RepoSpec & CommitSpec, CombinedFileDifference[]>
     }
@@ -178,7 +190,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
             forCommit: new DataLoader(
                 logDuration('loaders.codeSmell.forCommit', async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ repository, commit, file, kind, first, after }, index) => {
+                        specs.map(({ repository, commit, file, kind, pathPattern, first, after }, index) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
                                 (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
@@ -187,6 +199,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                                 repository,
                                 commit,
                                 fileQuery: file ? [{ file }] : null,
+                                pathPattern: pathPattern || null,
                                 kind: kind || null,
                                 first,
                                 after: cursor?.value,
@@ -197,7 +210,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         codeSmells: [null] | (CodeSmell & { lifespanObject: CodeSmellLifespan })[]
                     }>(sql`
                         select input."index", array_agg(to_jsonb(c)) as "codeSmells"
-                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "fileQuery" jsonb, "kind" text, "first" int, "after" uuid)
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "fileQuery" jsonb, "pathPattern" text, "kind" text, "first" int, "after" uuid)
                         left join lateral (
                             select code_smells.*, to_jsonb(code_smell_lifespans) as "lifespanObject"
                             from code_smells
@@ -207,6 +220,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                             and code_smells.commit = input.commit
                             -- optional filters:
                             and (input."fileQuery" is null or code_smells.locations @> input."fileQuery")
+                            and (input."pathPattern" is null or exists (select "file" from jsonb_to_recordset(code_smells.locations) as locations("file" text) where "file" ~* input."pathPattern"))
                             and (input.kind is null or code_smell_lifespans.kind = input.kind)
                             -- pagination:
                             and (input.after is null or code_smells.id >= input.after) -- include one before to know whether there is a previous page
@@ -360,16 +374,19 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
             ),
         },
 
-        files: new DataLoader<RepoSpec & CommitSpec, File[]>(
+        files: new DataLoader(
             logDuration('loaders.files', commits =>
                 mapPromise(
                     commits,
-                    ({ repository, commit }) =>
-                        git.listFiles({ repository, commit, repoRoot }).catch(err => asError(err)),
+                    ({ repository, commit, directory }) =>
+                        git.listFiles({ repository, commit, repoRoot, directory }).catch(err => asError(err)),
                     { concurrency: 100 }
                 )
             ),
-            { cacheKeyFn: repoAtCommitCacheKeyFn }
+            {
+                cacheKeyFn: ({ repository, commit, directory }) =>
+                    objectHash({ repository, commit, directory }),
+            }
         ),
 
         combinedFileDifference: {
@@ -447,36 +464,59 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
             forRepository: new DataLoader(
                 logDuration('loaders.commit.forRepository', async specs =>
                     Promise.all(
-                        specs.map(async ({ repository, first, after, startRevision, ...filterOptions }) => {
-                            try {
-                                const cursor =
-                                    (after && parseCursor<Commit>(after, new Set(['oid']))) || undefined
-                                const commits = await git
-                                    .log({
-                                        repoRoot,
-                                        repository,
-                                        startRevision: cursor?.value ?? startRevision,
-                                        ...filterOptions,
-                                    })
-                                    .tap((commit: Commit) =>
-                                        loaders.commit.bySha.prime({ repository, commit: commit.oid }, commit)
+                        specs.map(
+                            async ({ repository, first, after, startRevision, path, ...filterOptions }) => {
+                                try {
+                                    const cursor =
+                                        (after && parseCursor<Commit>(after, new Set(['oid']))) || undefined
+                                    const commits = await git
+                                        .log({
+                                            repoRoot,
+                                            repository,
+                                            startRevision: cursor?.value ?? startRevision,
+                                            ...filterOptions,
+                                        })
+                                        .tap((commit: Commit) =>
+                                            loaders.commit.bySha.prime(
+                                                { repository, commit: commit.oid },
+                                                commit
+                                            )
+                                        )
+                                        .take(typeof first === 'number' ? first + 1 : Infinity)
+                                        .toArray()
+                                    return connectionFromOverfetchedResult<Commit>(
+                                        commits,
+                                        { first, after },
+                                        'oid'
                                     )
-                                    .take(typeof first === 'number' ? first + 1 : Infinity)
-                                    .toArray()
-                                return connectionFromOverfetchedResult<Commit>(
-                                    commits,
-                                    { first, after },
-                                    'oid'
-                                )
-                            } catch (err) {
-                                return asError(err)
+                                } catch (err) {
+                                    return asError(err)
+                                }
                             }
-                        })
+                        )
                     )
                 ),
                 {
-                    cacheKeyFn: ({ repository, first, after, startRevision, messagePattern, since, until }) =>
-                        objectHash({ repository, first, after, startRevision, messagePattern, since, until }),
+                    cacheKeyFn: ({
+                        repository,
+                        first,
+                        after,
+                        startRevision,
+                        messagePattern,
+                        path,
+                        since,
+                        until,
+                    }) =>
+                        objectHash({
+                            repository,
+                            first,
+                            after,
+                            startRevision,
+                            messagePattern,
+                            path,
+                            since,
+                            until,
+                        }),
                 }
             ),
         },

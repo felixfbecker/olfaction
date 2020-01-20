@@ -301,15 +301,19 @@ export async function listFiles({
     repository,
     commit,
     repoRoot,
+    directory,
 }: {
     repository: string
     commit: GitObjectID
     repoRoot: string
+    directory?: string | null
 }): Promise<File[]> {
     try {
-        const { stdout } = await exec('git', ['ls-tree', '-r', '--name-only', '--full-name', commit], {
-            cwd: resolveRepoDir({ repoRoot, repository }),
-        })
+        const { stdout } = await exec(
+            'git',
+            ['ls-tree', '-r', '--name-only', '--full-name', commit, ...(directory ? [directory] : [])],
+            { cwd: resolveRepoDir({ repoRoot, repository }) }
+        )
         return stdout.split('\n').map(path => ({ path }))
     } catch (err) {
         if (err.killed) {
@@ -361,17 +365,21 @@ export interface GitLogFilters {
     /** Limit the commits output to ones with log message that matches the specified pattern (regular expression). */
     messagePattern?: string
 
-    /** Show commits more recent than a specific date. */
+    /** Return commits more recent than a specific date. */
     since?: string
 
-    /** Show commits older than a specific date. */
+    /** Return commits older than a specific date. */
     until?: string
+
+    /** Return only the history of the given directory or file. */
+    path?: string
 }
 
 export const log = ({
     repoRoot,
     repository,
     startRevision = 'HEAD',
+    path,
     messagePattern,
     since,
     until,
@@ -393,6 +401,7 @@ export const log = ({
             ...(until ? [`--until=${until}`] : []),
             startRevision,
             '--',
+            ...(path ? [path] : []),
         ],
         { cwd }
     )
