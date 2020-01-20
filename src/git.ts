@@ -28,19 +28,19 @@ export const resolveRepoDir = ({ repoRoot, repository }: RepoSpec & RepoRootSpec
 
 export async function filterValidCommits({
     repository,
-    commitShas,
+    commitOids,
     repoRoot,
 }: {
     repoRoot: string
     repository: string
-    commitShas: Iterable<GitObjectID>
+    commitOids: Iterable<GitObjectID>
 }): Promise<GitObjectID[]> {
     try {
         const { stdout } = await exec('git', ['rev-list', '--ignore-missing', '--no-walk', '--stdin', '--'], {
             cwd: resolveRepoDir({ repoRoot, repository }),
-            input: IterableX.from(commitShas)
+            input: IterableX.from(commitOids)
                 .filter(c => /[a-f0-9]{40}/.test(c))
-                .map(commitSha => commitSha + '\n')
+                .map(commitOid => commitOid + '\n')
                 .toNodeStream(),
         })
         return stdout.split('\n').filter(Boolean)
@@ -72,7 +72,7 @@ export async function checkCommitExists({
     commit: GitObjectID
 }): Promise<void> {
     validateObjectID(commit)
-    const filtered = await filterValidCommits({ repository, commitShas: [commit], repoRoot })
+    const filtered = await filterValidCommits({ repository, commitOids: [commit], repoRoot })
     if (filtered.length === 0) {
         throw new UnknownCommitError({ repository, commit })
     }
@@ -92,7 +92,7 @@ export async function getFileContent({
 }
 
 enum FormatTokens {
-    commitSha = '%H',
+    commitOid = '%H',
     newLine = '%n',
     authorName = '%aN',
     authorEmail = '%aE',
@@ -104,7 +104,7 @@ enum FormatTokens {
     bodyRaw = '%B',
 }
 const commitFormat: string = [
-    FormatTokens.commitSha,
+    FormatTokens.commitOid,
     FormatTokens.parentHashes,
     FormatTokens.authorName,
     FormatTokens.authorEmail,
@@ -150,14 +150,14 @@ const parseCommit = (chunk: string): Commit => {
 export async function getCommits({
     repoRoot,
     repository,
-    commitShas,
+    commitOids,
 }: {
     repoRoot: string
     repository: string
-    commitShas: Iterable<GitObjectID>
+    commitOids: Iterable<GitObjectID>
 }): Promise<ReadonlyMap<GitObjectID, Commit>> {
     // Bulk-validate the commits first, because git show fails hard on bad revisions
-    const filteredCommitShas = await filterValidCommits({ repoRoot, repository, commitShas })
+    const filteredCommitOids = await filterValidCommits({ repoRoot, repository, commitOids })
     try {
         const { stdout } = await exec(
             'git',
@@ -168,7 +168,7 @@ export async function getCommits({
                 '--no-color',
                 '-z', // seperate commits with NULL bytes
                 `--format=${commitFormat}`,
-                ...filteredCommitShas,
+                ...filteredCommitOids,
                 '--',
             ],
             { cwd: resolveRepoDir({ repoRoot, repository }) }
@@ -176,8 +176,8 @@ export async function getCommits({
         const commits = IterableX.from(stdout.split('\0'))
             .filter(chunk => chunk !== '')
             .map(parseCommit)
-        const commitsBySha = keyBy(commits, c => c.oid)
-        return commitsBySha
+        const commitsByOid = keyBy(commits, c => c.oid)
+        return commitsByOid
     } catch (err) {
         if (err.code === 'ENOENT') {
             throw new UnknownRepositoryError({ repository })
@@ -186,18 +186,18 @@ export async function getCommits({
     }
 }
 
-const commitChangesFormat = ['%x00', FormatTokens.commitSha].join('')
+const commitChangesFormat = ['%x00', FormatTokens.commitOid].join('')
 export async function getCombinedCommitDifference({
     repoRoot,
     repository,
-    commitShas,
+    commitOids,
 }: {
     repoRoot: string
     repository: string
-    commitShas: IterableX<GitObjectID>
+    commitOids: IterableX<GitObjectID>
 }): Promise<ReadonlyMap<GitObjectID, CombinedFileDifference[]>> {
     // Bulk-validate the commits first, because git show fails hard on bad revisions
-    const filteredCommitShas = await filterValidCommits({ repoRoot, repository, commitShas })
+    const filteredCommitOids = await filterValidCommits({ repoRoot, repository, commitOids })
     try {
         const { stdout } = await exec(
             'git',
@@ -211,7 +211,7 @@ export async function getCombinedCommitDifference({
                 '--cc',
                 '--combined-all-paths', // List the file path from each parent
                 `--format=${commitChangesFormat}`,
-                ...filteredCommitShas,
+                ...filteredCommitOids,
                 '--',
             ],
             { cwd: resolveRepoDir({ repoRoot, repository }) }

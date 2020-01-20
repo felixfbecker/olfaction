@@ -598,7 +598,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         }
 
         async commit({ oid }: { oid: string }, { loaders }: Context) {
-            const commit = await loaders.commit.bySha.load({ repository: this.name, commit: oid })
+            const commit = await loaders.commit.byOid.load({ repository: this.name, commit: oid })
             return createCommitResolver({ repository: this.name }, commit)
         }
 
@@ -629,11 +629,11 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         async duration(args: {}, { loaders }: Context): Promise<string> {
             const { repository, id: lifespan } = this.lifespan
             const instances = (await loaders.codeSmell.forLifespan.load({ lifespan }))!
-            const start = (await loaders.commit.bySha.load({
+            const start = (await loaders.commit.byOid.load({
                 repository,
                 commit: instances.edges[0].node.commit,
             }))!.committer.date
-            const end = (await loaders.commit.bySha.load({
+            const end = (await loaders.commit.byOid.load({
                 repository,
                 commit: last(instances.edges)!.node.commit,
             }))!.committer.date
@@ -643,11 +643,11 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         async interval(args: {}, { loaders }: Context): Promise<string> {
             const { repository, id: lifespan } = this.lifespan
             const instances = (await loaders.codeSmell.forLifespan.load({ lifespan }))!
-            const start = (await loaders.commit.bySha.load({
+            const start = (await loaders.commit.byOid.load({
                 repository,
                 commit: instances.edges[0].node.commit,
             }))!.committer.date
-            const end = (await loaders.commit.bySha.load({
+            const end = (await loaders.commit.byOid.load({
                 repository,
                 commit: last(instances.edges)!.node.commit,
             }))!.committer.date
@@ -713,7 +713,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
 
         async commit(args: {}, { loaders }: Context): Promise<CommitResolver> {
             const { repository } = (await loaders.codeSmellLifespan.byId.load(this.codeSmell.lifespan))!
-            const commit = await loaders.commit.bySha.load({ repository, commit: this.codeSmell.commit })
+            const commit = await loaders.commit.byOid.load({ repository, commit: this.codeSmell.commit })
             return createCommitResolver({ repository }, commit)
         }
 
@@ -756,7 +756,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         return {
             ...commit,
             parents: async (args: {}, { loaders }: Context) => {
-                const parentCommits = await loaders.commit.bySha.loadMany(
+                const parentCommits = await loaders.commit.byOid.loadMany(
                     commit.parents.map(parentOid => ({ repository, commit: parentOid }))
                 )
                 return parentCommits.map(parent => createCommitResolver({ repository }, parent))
@@ -838,7 +838,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         }
 
         async commit(args: {}, { loaders }: Context) {
-            const commit = await loaders.commit.bySha.load(this.spec)
+            const commit = await loaders.commit.byOid.load(this.spec)
             return createCommitResolver(this.spec, commit)
         }
 

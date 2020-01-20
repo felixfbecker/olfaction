@@ -37,7 +37,7 @@ export const createRestRouter = ({
 
             await git.checkRepositoryExists({ repository, repoRoot })
             await git.checkCommitExists({ repository, commit, repoRoot })
-            const commitData = (await git.getCommits({ repository, commitShas: [commit], repoRoot })).get(
+            const commitData = (await git.getCommits({ repository, commitOids: [commit], repoRoot })).get(
                 commit
             )
             const result = await dbPool.query(sql`

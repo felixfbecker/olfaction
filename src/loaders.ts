@@ -67,9 +67,9 @@ export interface Loaders {
     }
 
     commit: {
-        bySha: DataLoader<RepoSpec & CommitSpec, Commit>
+        byOid: DataLoader<RepoSpec & CommitSpec, Commit>
 
-        /** Loads the existing commit SHAs in a repository */
+        /** Loads the existing commit OIDs in a repository */
         forRepository: DataLoader<
             RepoSpec & ForwardConnectionArguments & git.GitLogFilters,
             Connection<Commit>
@@ -399,7 +399,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                                 .getCombinedCommitDifference({
                                     repoRoot,
                                     repository,
-                                    commitShas: commits.map(c => c.commit),
+                                    commitOids: commits.map(c => c.commit),
                                 })
                                 .catch(err => asError(err))
                     )
@@ -433,7 +433,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
         ),
 
         commit: {
-            bySha: new DataLoader<RepoSpec & CommitSpec, Commit>(
+            byOid: new DataLoader<RepoSpec & CommitSpec, Commit>(
                 async specs => {
                     const commitsByRepo = await mapCommitRepoSpecsGroupedByRepo(
                         specs,
@@ -442,7 +442,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                                 .getCommits({
                                     repoRoot,
                                     repository,
-                                    commitShas: commits.map(c => c.commit),
+                                    commitOids: commits.map(c => c.commit),
                                 })
                                 .catch(err => asError(err))
                     )
@@ -477,7 +477,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                                             ...filterOptions,
                                         })
                                         .tap((commit: Commit) =>
-                                            loaders.commit.bySha.prime(
+                                            loaders.commit.byOid.prime(
                                                 { repository, commit: commit.oid },
                                                 commit
                                             )
