@@ -447,6 +447,21 @@ export const createRestRouter = ({
                                     successor {
                                         id
                                     }
+                                    commit {
+                                        oid
+                                        message
+                                        author {
+                                            name
+                                            date
+                                            email
+                                        }
+                                        committer {
+                                            name
+                                            date
+                                            email
+                                        }
+                                        #parents
+                                    }
                                 }
                             }
                             pageInfo {
