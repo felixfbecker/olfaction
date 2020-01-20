@@ -402,7 +402,7 @@ export const log = ({
             '-z',
             `--format=${commitFormat}`,
             ...(messagePattern
-                ? [`--messagePattern=${messagePattern}`, '--extended-regexp', '--regexp-ignore-case']
+                ? [`--grep=${messagePattern}`, '--extended-regexp', '--regexp-ignore-case']
                 : []),
             ...(since ? [`--since=${since}`] : []),
             ...(until ? [`--until=${until}`] : []),
