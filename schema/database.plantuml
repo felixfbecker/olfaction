@@ -10,10 +10,10 @@ entity code_smell_lifespans {
 
 entity code_smells {
   *id UUID <<PK>>
-  *message TEXT
-  *commit TEXT
   *lifespan UUID <<FK>>
   *ordinal INTEGER
+  *commit TEXT
+  message TEXT
   locations JSONB
 }
 
