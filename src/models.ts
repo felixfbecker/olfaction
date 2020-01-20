@@ -31,6 +31,7 @@ export interface Signature {
 
 export interface Commit {
     oid: GitObjectID
+    parents: GitObjectID[]
     author: Signature
     committer: Signature
     message: string

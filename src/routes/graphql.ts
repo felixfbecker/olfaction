@@ -755,6 +755,12 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         const spec = { repository, commit: commit.oid }
         return {
             ...commit,
+            parents: async (args: {}, { loaders }: Context) => {
+                const parentCommits = await loaders.commit.bySha.loadMany(
+                    commit.parents.map(parentOid => ({ repository, commit: parentOid }))
+                )
+                return parentCommits.map(parent => createCommitResolver({ repository }, parent))
+            },
             repository: () => new RepositoryResolver(repository),
             subject: (): string => commit.message.split('\n', 1)[0],
             combinedFileDifferences: async (args: ForwardConnectionArguments, { loaders }: Context) => {
@@ -837,7 +843,11 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         }
 
         async codeSmells(args: ForwardConnectionArguments & KindFilter, { loaders }: Context) {
-            const codeSmells = await loaders.codeSmell.forCommit.load({ ...this.spec, ...args })
+            const codeSmells = await loaders.codeSmell.forCommit.load({
+                ...this.spec,
+                ...args,
+                pathPattern: null,
+            })
             return codeSmells
         }
 

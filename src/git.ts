@@ -21,6 +21,7 @@ import { fromNodeStream } from 'ix'
 import { AsyncIterableX } from 'ix/asynciterable'
 import { keyBy } from './util'
 import { IterableX } from 'ix/iterable'
+import assert from 'assert'
 
 export const resolveRepoDir = ({ repoRoot, repository }: RepoSpec & RepoRootSpec): string =>
     path.join(repoRoot, repository + '.git')
@@ -99,10 +100,12 @@ enum FormatTokens {
     committerName = '%cN',
     committerEmail = '%cE',
     committerIsoDateStrict = '%cI',
+    parentHashes = '%P',
     bodyRaw = '%B',
 }
 const commitFormat: string = [
     FormatTokens.commitSha,
+    FormatTokens.parentHashes,
     FormatTokens.authorName,
     FormatTokens.authorEmail,
     FormatTokens.authorIsoDateStrict,
@@ -118,6 +121,7 @@ const commitFormat: string = [
 const parseCommit = (chunk: string): Commit => {
     const [
         oid,
+        parentHashes,
         authorName,
         authorEmail,
         authorDate,
@@ -128,6 +132,7 @@ const parseCommit = (chunk: string): Commit => {
     ] = chunk.split('\n')
     return {
         oid,
+        parents: parentHashes.split(' '),
         author: {
             name: authorName,
             email: authorEmail,
@@ -168,7 +173,9 @@ export async function getCommits({
             ],
             { cwd: resolveRepoDir({ repoRoot, repository }) }
         )
-        const commits = IterableX.from(stdout.split('\0')).map(parseCommit)
+        const commits = IterableX.from(stdout.split('\0'))
+            .filter(chunk => chunk !== '')
+            .map(parseCommit)
         const commitsBySha = keyBy(commits, c => c.oid)
         return commitsBySha
     } catch (err) {
