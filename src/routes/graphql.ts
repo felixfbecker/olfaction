@@ -52,7 +52,7 @@ import { transaction, mapConnectionNodes, logDuration, DBContext, withDBConnecti
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 import { connectionDefinitions, forwardConnectionArgs, Connection, connectionFromArray } from 'graphql-relay'
-import { last, identity } from 'lodash'
+import { last, identity, sortBy } from 'lodash'
 import sloc from 'sloc'
 import * as path from 'path'
 import { UnknownCodeSmellError } from '../errors'
@@ -908,6 +908,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 transaction(db, () =>
                     Promise.all(
                         codeSmells.map(async ({ kind, message, locations, lifespan, ordinal }) => {
+                            // Normalization
                             message = message?.trim() || null
                             for (const location of locations) {
                                 if (path.posix.isAbsolute(location.file)) {
@@ -917,7 +918,16 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                 }
                                 location.file = path.normalize(location.file)
                             }
+                            locations = sortBy(locations, [
+                                l => l.file,
+                                l => l.range.start.line,
+                                l => l.range.start.character,
+                                l => l.range.end.line,
+                                l => l.range.end.character,
+                            ])
+
                             const locationsJson = JSON.stringify(locations)
+
                             // Get or create lifespan with ID passed from client
                             const lifespanResult = await db.query<{ id: UUID }>(sql`
                                 insert into code_smell_lifespans (id, kind, repository)
