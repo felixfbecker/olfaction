@@ -2,6 +2,7 @@ import { Client, ClientBase, Pool } from 'pg'
 import sql from 'sql-template-strings'
 import { Connection } from 'graphql-relay'
 import { ExecutionResult } from 'graphql'
+import { isEqual } from 'lodash'
 
 export function keyBy<K, V>(items: Iterable<V>, by: (value: V) => K): Map<K, V> {
     const map = new Map<K, V>()
@@ -42,27 +43,35 @@ export const base64encode = (str: string): string => Buffer.from(str, 'utf-8').t
 /** Decode a Base64 string */
 export const base64decode = (base64: string): string => Buffer.from(base64, 'base64').toString('utf-8')
 
-interface Cursor<T> {
+interface Cursor<T extends object> {
     /** The attribute that the cursor refers to */
-    key: keyof T
+    key: CursorKey<T>
     /** The serialized value the cursor points to (may need to be coerced). */
     value: string
 }
 
+/** A potentially compound key for a cursor. */
+export type CursorKey<T extends object> = readonly (keyof T)[]
+
 /**
- * Parses a string cursor as used in the olfaction API.
- * A cursor is composed of a target attribute, a colon, and the value of the property, all Base64 encoded.
- * E.g. base64encode("id:6fcc41f6-772d-4601-b940-6012b30b25b7")
+ * Parses a string cursor as used in the olfaction API. A cursor is composed of
+ * one or mupltiple target attributes seperated by a comma, a colon, and the
+ * value of the property, all Base64 encoded.
+ * E.g. `base64encode("id:6fcc41f6-772d-4601-b940-6012b30b25b7")`
  *
  * @param after The after parameter provided
- * @param validKeys The keys that are valid cursor targets
+ * @param validKeys The keys or compound keys that are valid cursor targets
  */
-export function parseCursor<T extends object>(after: string, validKeys: ReadonlySet<keyof T>): Cursor<T> {
-    const [key, value] = base64decode(after).split(':', 2)
-    if (value === undefined || !validKeys.has(key as keyof T)) {
+export function parseCursor<T extends object>(
+    after: string,
+    validKeys: (keyof T | CursorKey<T>)[]
+): Cursor<T> {
+    const [keyStr, value] = base64decode(after).split(':', 2)
+    const compoundKey = keyStr.split(',')
+    if (value === undefined || !validKeys.some(validKey => isEqual(compoundKey, validKey))) {
         throw new Error('Invalid cursor')
     }
-    return { key: key as keyof T, value }
+    return { key: compoundKey as (keyof T)[], value }
 }
 
 /**

@@ -20,6 +20,12 @@ export interface CodeSmellLifespan {
     id: UUID
     kind: string
     repository: string
+    analysis: UUID
+}
+
+export interface Analysis {
+    id: UUID
+    name: string
 }
 
 export interface Signature {
@@ -111,6 +117,14 @@ export interface RevisionSpec {
 
 export interface FileSpec {
     file: string
+}
+
+export interface AnalysisSpec {
+    analysis: UUID
+}
+
+export interface AnalysisName {
+    name: string
 }
 
 export interface RepoRootSpec {

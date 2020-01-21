@@ -11,6 +11,7 @@ entity code_smell_lifespans {
   *id UUID <<PK>>
   *kind TEXT
   *repository TEXT
+  *analysis UUID <<FK>>
 }
 
 entity code_smells {
@@ -18,11 +19,25 @@ entity code_smells {
   *lifespan UUID <<FK>>
   *ordinal INTEGER
   *commit TEXT
+  *locations JSONB
   message TEXT
-  locations JSONB
 }
 
-code_smells ||-- code_smell_lifespans
+code_smells }|--|| code_smell_lifespans
+
+entity analyses {
+  *id UUID <<PK>>
+  *name TEXT
+}
+code_smells }o--|| analyses
+
+entity analysed_commits {
+  *analysis UUID
+  *repository TEXT
+  *commit TEXT
+}
+
+analyses ||--o{ analysed_commits
 
 ' entity file_links {
 '   *from_path TEXT

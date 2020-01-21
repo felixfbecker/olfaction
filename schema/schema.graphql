@@ -1,3 +1,79 @@
+type Analysis {
+  """
+  The unique name of the analysis
+  """
+  name: String!
+
+  """
+  The repositories that were analyzed as part of this analysis.
+  """
+  analyzedRepositories(after: String, first: Int): RepositoryConnection!
+
+  """
+  The commits that were analyzed as part of this analysis, across all repositories.
+  """
+  analyzedCommits(after: String, first: Int): CommitConnection!
+
+  """
+  The code smell lifespans that were found in this analysis.
+  """
+  codeSmellLifespans(
+    """
+    Only return code smells with this kind.
+    """
+    kind: String
+    after: String
+    first: Int
+  ): CodeSmellLifespanConnection!
+
+  """
+  The code smell lifespans that were found in this analysis.
+  """
+  codeSmells(
+    """
+    Only return code smells with this kind.
+    """
+    kind: String
+
+    """
+    Only return code smells that affect a file matching the given path pattern (regular expression).
+    """
+    pathPattern: String
+    after: String
+    first: Int
+  ): CodeSmellConnection!
+}
+
+"""
+A connection to a list of items.
+"""
+type AnalysisConnection {
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+
+  """
+  A list of edges.
+  """
+  edges: [AnalysisEdge]
+}
+
+"""
+An edge in a connection.
+"""
+type AnalysisEdge {
+  """
+  The item at the end of the edge
+  """
+  node: Analysis
+
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
+}
+
 type CodeSmell {
   id: ID!
 
@@ -92,11 +168,6 @@ type CodeSmellLifespan {
   id: ID!
 
   """
-  Only return code smells with this kind.
-  """
-  kind: String
-
-  """
   The instances of the code smell throughout commit history.
   """
   instances(after: String, first: Int): CodeSmellConnection!
@@ -110,6 +181,11 @@ type CodeSmellLifespan {
   The interval this code smell was present in the codebase as an ISO8601 interval string with start/end
   """
   interval: String!
+
+  """
+  The analysis this code smell was detected in.
+  """
+  analysis: Analysis!
 }
 
 """
@@ -237,13 +313,13 @@ type Commit {
     Only return code smells with this kind.
     """
     kind: String
-    after: String
-    first: Int
 
     """
     Only return code smells that affect a file matching the given path pattern (regular expression).
     """
     pathPattern: String
+    after: String
+    first: Int
   ): CodeSmellConnection!
 }
 
@@ -500,6 +576,8 @@ type Query {
     name: String!
   ): Repository
   repositories(after: String, first: Int): RepositoryConnection!
+  analyses(after: String, first: Int): AnalysisConnection!
+  analysis(name: String!): Analysis!
 }
 
 type Range {

@@ -14,8 +14,7 @@ import {
     GraphQLScalarType,
     Kind,
 } from 'graphql'
-import graphQLHTTPServer, { OptionsData } from 'express-graphql'
-import * as pg from 'pg'
+import graphQLHTTPServer from 'express-graphql'
 import {
     listRepositories,
     checkRepositoryExists,
@@ -47,6 +46,8 @@ import {
     RepoRootSpec,
     CodeSmellInput,
     ChangeKind,
+    Analysis,
+    AnalysisName,
 } from '../models'
 import { transaction, mapConnectionNodes, logDuration, DBContext, withDBConnection } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
@@ -56,6 +57,7 @@ import { last, identity, sortBy } from 'lodash'
 import sloc from 'sloc'
 import * as path from 'path'
 import { UnknownCodeSmellError } from '../errors'
+import pMap from 'p-map'
 
 type GraphQLArg<T> = T extends undefined ? Exclude<T, undefined> | null : T
 /**
@@ -85,6 +87,13 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         kind: {
             type: GraphQLString,
             description: 'Only return code smells with this kind.',
+        },
+    }
+    var codeSmellPathPatternArg: GraphQLFieldConfigArgumentMap = {
+        pathPattern: {
+            type: GraphQLString,
+            description:
+                'Only return code smells that affect a file matching the given path pattern (regular expression).',
         },
     }
 
@@ -123,29 +132,29 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     })
 
     // FUTURE:
-    // var FileDifferenceType = new GraphQLObjectType({
-    //     name: 'FileDifference',
-    //     description: 'The difference of a file between two revisions.',
-    //     fields: () => ({
-    //         changeKind: {
-    //             description: 'The change kind git detected comparing to the base revision.',
-    //             type: GraphQLNonNull(FileChangeKindEnum),
-    //         },
-    //         headFile: {
-    //             type: FileType,
-    //             description:
-    //                 'The version of the file at the head revision. null if the file no longer exists in the head revision.',
-    //         },
-    //         baseFile: {
-    //             type: FileType,
-    //             description:
-    //                 'The version of the file in the base revision. null if that commit did not contain the file.',
-    //         },
-    //         // FUTURE
-    //         // hunks: {}
-    //         // patch: { type: GraphQLNonNull(GraphQLString) }
-    //     }),
-    // })
+    /* var FileDifferenceType = new GraphQLObjectType({
+        name: 'FileDifference',
+        description: 'The difference of a file between two revisions.',
+        fields: () => ({
+            changeKind: {
+                description: 'The change kind git detected comparing to the base revision.',
+                type: GraphQLNonNull(FileChangeKindEnum),
+            },
+            headFile: {
+                type: FileType,
+                description:
+                    'The version of the file at the head revision. null if the file no longer exists in the head revision.',
+            },
+            baseFile: {
+                type: FileType,
+                description:
+                    'The version of the file in the base revision. null if that commit did not contain the file.',
+            },
+            // FUTURE
+            // hunks: {}
+            // patch: { type: GraphQLNonNull(GraphQLString) }
+        }),
+    */
 
     var CombinedFileDifferenceType = new GraphQLObjectType({
         name: 'CombinedFileDifference',
@@ -219,12 +228,8 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 type: GraphQLNonNull(CodeSmellConnectionType),
                 args: {
                     ...kindFilterArg,
+                    ...codeSmellPathPatternArg,
                     ...forwardConnectionArgs,
-                    pathPattern: {
-                        type: GraphQLString,
-                        description:
-                            'Only return code smells that affect a file matching the given path pattern (regular expression).',
-                    },
                 },
             },
         }),
@@ -368,6 +373,45 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         },
     })
 
+    var AnalysisType = new GraphQLObjectType({
+        name: 'Analysis',
+        fields: () => ({
+            name: {
+                description: 'The unique name of the analysis',
+                type: GraphQLNonNull(GraphQLString),
+            },
+            analyzedRepositories: {
+                description: 'The repositories that were analyzed as part of this analysis.',
+                type: GraphQLNonNull(RepositoryConnectionType),
+                args: forwardConnectionArgs,
+            },
+            analyzedCommits: {
+                description:
+                    'The commits that were analyzed as part of this analysis, across all repositories.',
+                type: GraphQLNonNull(CommitConnectionType),
+                args: forwardConnectionArgs,
+            },
+            codeSmellLifespans: {
+                description: 'The code smell lifespans that were found in this analysis.',
+                type: GraphQLNonNull(CodeSmellLifespanConnectionType),
+                args: {
+                    ...kindFilterArg,
+                    ...forwardConnectionArgs,
+                },
+            },
+            codeSmells: {
+                description: 'The code smell lifespans that were found in this analysis.',
+                type: GraphQLNonNull(CodeSmellConnectionType),
+                args: {
+                    ...kindFilterArg,
+                    ...codeSmellPathPatternArg,
+                    ...forwardConnectionArgs,
+                },
+            },
+        }),
+    })
+    var { connectionType: AnalysisConnectionType } = connectionDefinitions({ nodeType: AnalysisType })
+
     var CodeSmellType: GraphQLObjectType = new GraphQLObjectType({
         name: 'CodeSmell',
         fields: () => ({
@@ -410,7 +454,6 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             id: {
                 type: GraphQLNonNull(GraphQLID),
             },
-            ...kindFilterArg,
             instances: {
                 args: forwardConnectionArgs,
                 type: GraphQLNonNull(CodeSmellConnectionType),
@@ -425,6 +468,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 type: GraphQLNonNull(GraphQLString),
                 description:
                     'The interval this code smell was present in the codebase as an ISO8601 interval string with start/end',
+            },
+            analysis: {
+                type: GraphQLNonNull(AnalysisType),
+                description: 'The analysis this code smell was detected in.',
             },
         },
     })
@@ -553,6 +600,16 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     args: forwardConnectionArgs,
                     type: GraphQLNonNull(RepositoryConnectionType),
                 },
+                analyses: {
+                    args: forwardConnectionArgs,
+                    type: GraphQLNonNull(AnalysisConnectionType),
+                },
+                analysis: {
+                    args: {
+                        name: { type: GraphQLNonNull(GraphQLString) },
+                    },
+                    type: GraphQLNonNull(AnalysisType),
+                },
             },
         }),
         mutation: new GraphQLObjectType({
@@ -575,6 +632,57 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             },
         }),
     })
+
+    class AnalysisResolver {
+        constructor(private analysis: Analysis) {}
+        name() {
+            return this.analysis.name
+        }
+        async codeSmellLifespans(
+            args: GraphQLArgs<ForwardConnectionArguments & KindFilter>,
+            { loaders }: Context
+        ) {
+            const lifespans = await loaders.codeSmellLifespan.many.load(args)
+            return mapConnectionNodes(lifespans, lifespan => new CodeSmellLifespanResolver(lifespan))
+        }
+        async codeSmells(
+            args: GraphQLArgs<ForwardConnectionArguments & KindFilter & PathPatternFilter>,
+            { loaders }: Context
+        ) {
+            const codeSmells = await loaders.codeSmell.many.load(args)
+            return mapConnectionNodes(codeSmells, codeSmell => new CodeSmellResolver(codeSmell))
+        }
+        async analyzedCommits(
+            args: ForwardConnectionArguments,
+            { loaders }: Context
+        ): Promise<Connection<CommitResolver>> {
+            const { edges, pageInfo } = await loaders.commit.forAnalysis.load({
+                ...args,
+                analysis: this.analysis.id,
+            })
+            return {
+                pageInfo,
+                edges: await pMap(
+                    edges,
+                    async ({ node, cursor }) => {
+                        const commit = await loaders.commit.byOid.load(node)
+                        return { node: createCommitResolver(node, commit), cursor }
+                    },
+                    { concurrency: 100 }
+                ),
+            }
+        }
+        async analyzedRepositories(
+            args: ForwardConnectionArguments,
+            { loaders }: Context
+        ): Promise<Connection<RepositoryResolver>> {
+            const repos = await loaders.repository.forAnalysis.load({
+                ...args,
+                analysis: this.analysis.id,
+            })
+            return mapConnectionNodes(repos, ({ repository }) => new RepositoryResolver(repository))
+        }
+    }
 
     class RepositoryResolver {
         constructor(public name: string) {}
@@ -606,7 +714,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             { kind, ...args }: GraphQLArgs<KindFilter & ForwardConnectionArguments>,
             { loaders }: Context
         ): Promise<Connection<CodeSmellLifespanResolver>> {
-            const connection = await loaders.codeSmellLifespan.forRepository.load({
+            const connection = await loaders.codeSmellLifespan.many.load({
                 ...args,
                 repository: this.name,
                 kind,
@@ -667,6 +775,11 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 edges: edges.map(({ node, cursor }) => ({ cursor, node: new CodeSmellResolver(node) })),
             }
         }
+
+        async analysis(args: {}, { loaders }: Context) {
+            const analysis = await loaders.analysis.byId.load(this.lifespan.analysis)
+            return new AnalysisResolver(analysis)
+        }
     }
 
     class CodeSmellResolver {
@@ -678,7 +791,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             return this.codeSmell.message
         }
         async lifespan(args: {}, { loaders }: Context) {
-            const lifespan = (await loaders.codeSmellLifespan.byId.load(this.codeSmell.lifespan))!
+            const lifespan = (await loaders.codeSmellLifespan.oneById.load(this.codeSmell.lifespan))!
             return new CodeSmellLifespanResolver(lifespan)
         }
         async predecessor(args: {}, { loaders }: Context): Promise<CodeSmellResolver | null> {
@@ -712,13 +825,13 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         }
 
         async commit(args: {}, { loaders }: Context): Promise<CommitResolver> {
-            const { repository } = (await loaders.codeSmellLifespan.byId.load(this.codeSmell.lifespan))!
+            const { repository } = (await loaders.codeSmellLifespan.oneById.load(this.codeSmell.lifespan))!
             const commit = await loaders.commit.byOid.load({ repository, commit: this.codeSmell.commit })
             return createCommitResolver({ repository }, commit)
         }
 
         async locations(args: {}, { loaders }: Context) {
-            const { repository } = (await loaders.codeSmellLifespan.byId.load(this.codeSmell.lifespan))!
+            const { repository } = (await loaders.codeSmellLifespan.oneById.load(this.codeSmell.lifespan))!
             return this.codeSmell.locations.map(
                 location => new LocationResolver({ ...location, ...this.codeSmell, repository })
             )
@@ -794,7 +907,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 args: GraphQLArgs<ForwardConnectionArguments & KindFilter & PathPatternFilter>,
                 { loaders }: Context
             ): Promise<Connection<CodeSmellResolver>> {
-                const connection = await loaders.codeSmell.forCommit.load({ ...spec, ...args })
+                const connection = await loaders.codeSmell.many.load({ ...spec, ...args })
                 return mapConnectionNodes(connection, node => new CodeSmellResolver(node))
             },
             async files(
@@ -843,7 +956,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         }
 
         async codeSmells(args: ForwardConnectionArguments & KindFilter, { loaders }: Context) {
-            const codeSmells = await loaders.codeSmell.forCommit.load({
+            const codeSmells = await loaders.codeSmell.many.load({
                 ...this.spec,
                 ...args,
                 pathPattern: null,
@@ -883,8 +996,16 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             return new CodeSmellResolver(codeSmell)
         },
         async codeSmellLifespan({ id }: { id: UUID }, { loaders }: Context) {
-            const lifespan = await loaders.codeSmellLifespan.byId.load(id)
+            const lifespan = await loaders.codeSmellLifespan.oneById.load(id)
             return new CodeSmellLifespanResolver(lifespan)
+        },
+        async analysis({ name }: GraphQLArgs<AnalysisName>, { loaders }: Context) {
+            const analysis = await loaders.analysis.byName.load(name)
+            return new AnalysisResolver(analysis)
+        },
+        async analyses(args: ForwardConnectionArguments, { loaders }: Context) {
+            const analyses = await loaders.analysis.all.load(args)
+            return mapConnectionNodes(analyses, analysis => new AnalysisResolver(analysis))
         },
     }
 

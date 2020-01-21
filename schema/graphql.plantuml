@@ -13,10 +13,21 @@ class Query {
   {method} +repositories: Connection<Repository>!
   {method} +codeSmell(id: ID!): CodeSmell
   {method} +codeSmellLifespan(id: ID!): CodeSmellLifespan
+  {method} +analysis(name: String!): Analysis
+  {method} +analyses: Connection<Analysis>
 }
-Query *-- Repository
-Query *-- CodeSmell
-Query *-- CodeSmellLifespan
+Query "1" *-- "0..*" Repository : queries >
+Query "1" *-- "0..1" Repository : queries >
+Query "1" *-- "0..1" CodeSmell : queries >
+Query "1" *-- "0..1" CodeSmellLifespan : queries >
+Query "1" *- "0..*" Analysis : queries >
+Query "1" *- "0..1" Analysis : queries >
+
+class Analysis {
+  +name: String!
+  {method} +analyzedRepositories: Connection<Repository>!
+  {method} +analyzedCommits: Connection<Commit>!
+}
 
 class Repository {
   +name: String!
@@ -26,20 +37,24 @@ class Repository {
 }
 Repository "1" *-- "0..*" Commit
 Repository "1" *-- "0..*" CodeSmellLifespan
+Analysis "0..*" o-- "0..*" Repository : analyzed >
 
 class Commit {
   +oid: String!
   +committer: Signature!
   +author: Signature!
-  {method} +combinedFileDifferencees: Connection<CombinedFileDifference>!
+  +parents: [Commit!]!
+  {method} +combinedFileDifferences: Connection<CombinedFileDifference>!
   {method} +codeSmells: Connection<CodeSmell>!
   {method} +files: Connection<File>!
 }
+Commit "0..*" *-- "0..*" Commit : has parents >
 Commit --> Signature : committed by >
 Commit --> Signature : authored by >
 Commit "1" *-- "0..*" CodeSmell : exists in <
 Commit "1" *-- "0..*" File : exists in <
 Commit "1" *-- "0..*" CombinedFileDifference
+Commit "0..*" --o "0..*" Analysis : analyzed <
 
 class CombinedFileDifference {
   +changeKinds: [FileChangeKind!]!
@@ -71,23 +86,27 @@ class CodeSmell {
   +commit: Commit!
   +locations: [Location!]!
   +ordinal: Int!
+  {method} +predecessor: CodeSmell
+  {method} +successor: CodeSmell
   {method} +lifespan: CodeSmellLifespan!
 }
 CodeSmell "0..*" o-- "1..*" Location : at >
+CodeSmell "1" --> "0..1" CodeSmell : follows >
+CodeSmell "1" --> "0..1" CodeSmell : followed by >
 
 class Location {
   +file: File!
   +range: Range!
   +contents(encoding: String): String!
 }
-Location "0..*" --* "1" File : in >
+Location "0..*" -* "1" File : in >
 Location --> Range : at >
 class Range {
   +start: Position!
   +end: Position!
 }
-Range --> Position : from >
-Range --> Position : to >
+Range -> Position : from >
+Range -> Position : to >
 class Position {
   +line: Int!
   +character: Int!
@@ -96,12 +115,14 @@ class Position {
 class CodeSmellLifespan {
   +id: ID!
   +kind: String!
-  +repository: Repository!
   +duration: String!
   +interval: String!
+  {method} +repository: Repository!
+  {method} +analysis: Analysis!
   {method} +instances: Connection<CodeSmell>!
 }
 CodeSmellLifespan "1" *-- "1..*" CodeSmell
+CodeSmellLifespan "0..*" --* "1" Analysis : detected <
 
 class LineCounts {
   +total: Int!
@@ -117,7 +138,6 @@ class LineCounts {
 
 class File {
   +path: String!
-  +linesCount: Int!
   +content(encoding: String): String!
   +lineCounts(encoding: String): LineCounts!
   {method} +codeSmells: Connection<CodeSmell>!

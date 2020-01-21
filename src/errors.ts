@@ -1,4 +1,13 @@
-import { RepoSpec, CommitSpec, CodeSmellLifespanSpec, CodeSmellSpec, CodeSmell, RevisionSpec } from './models'
+import {
+    RepoSpec,
+    CommitSpec,
+    CodeSmellLifespanSpec,
+    CodeSmellSpec,
+    CodeSmell,
+    RevisionSpec,
+    AnalysisSpec,
+    AnalysisName,
+} from './models'
 import * as HttpStatus from 'http-status-codes'
 
 export class UnknownCodeSmellLifespanError extends Error {
@@ -7,6 +16,21 @@ export class UnknownCodeSmellLifespanError extends Error {
 
     constructor({ lifespan }: CodeSmellLifespanSpec) {
         super(`Could not find code smell lifespan with id ${lifespan}`)
+    }
+}
+
+export class UnknownAnalysisError extends Error {
+    public readonly name: 'UnknownAnalysisError'
+    public readonly status: typeof HttpStatus.NOT_FOUND
+
+    constructor(spec: AnalysisSpec | AnalysisName) {
+        if ('analysis' in spec) {
+            super(`Could not find analysis with id ${spec.analysis}`)
+        } else {
+            super(`Could not find analysis with name '${spec.name}'`)
+        }
+        this.name = 'UnknownAnalysisError'
+        this.status = HttpStatus.NOT_FOUND
     }
 }
 

@@ -14,12 +14,28 @@ import {
     CodeSmellSpec,
     CombinedFileDifference,
     RepoRootSpec,
+    Analysis,
+    AnalysisSpec,
 } from './models'
-import { NullFields, base64encode, parseCursor, isNullArray, asError, logDuration, DBContext } from './util'
+import {
+    NullFields,
+    base64encode,
+    parseCursor,
+    isNullArray,
+    asError,
+    logDuration,
+    DBContext,
+    CursorKey,
+} from './util'
 import assert from 'assert'
 import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
-import { UnknownCodeSmellError, UnknownCommitError, UnknownCodeSmellLifespanError } from './errors'
+import {
+    UnknownCodeSmellError,
+    UnknownCommitError,
+    UnknownCodeSmellLifespanError,
+    UnknownAnalysisError,
+} from './errors'
 import objectHash from 'object-hash'
 import mapPromise from 'p-map'
 
@@ -40,15 +56,21 @@ export interface PathPatternFilter {
 }
 
 export interface Loaders {
+    analysis: {
+        all: DataLoader<ForwardConnectionArguments, Connection<Analysis>>
+        byId: DataLoader<Analysis['id'], Analysis>
+        byName: DataLoader<Analysis['name'], Analysis>
+    }
     codeSmell: {
         /** Loads a code smell by ID. */
         byId: DataLoader<CodeSmell['id'], CodeSmell>
         byOrdinal: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>
         /** Loads the entire life span of a given lifespan ID. */
         forLifespan: DataLoader<CodeSmellLifespanSpec & ForwardConnectionArguments, Connection<CodeSmell>>
-        forCommit: DataLoader<
-            RepoSpec &
-                CommitSpec &
+        many: DataLoader<
+            Partial<RepoSpec> &
+                Partial<CommitSpec> &
+                Partial<AnalysisSpec> &
                 Partial<FileSpec> &
                 KindFilter &
                 PathPatternFilter &
@@ -58,12 +80,16 @@ export interface Loaders {
     }
     codeSmellLifespan: {
         /** Loads a code smell lifespan by ID. */
-        byId: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>
-        /** Loads the code smell lifespans in a given repository. */
-        forRepository: DataLoader<
-            RepoSpec & KindFilter & ForwardConnectionArguments,
+        oneById: DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>
+        /** Loads the code smell lifespans for a given repository, analysis and/or kind. */
+        many: DataLoader<
+            Partial<RepoSpec> & Partial<AnalysisSpec> & KindFilter & ForwardConnectionArguments,
             Connection<CodeSmellLifespan>
         >
+    }
+
+    repository: {
+        forAnalysis: DataLoader<AnalysisSpec & ForwardConnectionArguments, Connection<RepoSpec>>
     }
 
     commit: {
@@ -74,6 +100,9 @@ export interface Loaders {
             RepoSpec & ForwardConnectionArguments & git.GitLogFilters,
             Connection<Commit>
         >
+
+        /** Loads the commits (and their repos) that were analyzed in an analysis */
+        forAnalysis: DataLoader<AnalysisSpec & ForwardConnectionArguments, Connection<RepoSpec & CommitSpec>>
     }
 
     files: DataLoader<RepoSpec & CommitSpec & DirectoryFilter, File[]>
@@ -95,17 +124,20 @@ const connectionArgsKeyFn = ({ first, after }: ForwardConnectionArguments): stri
  *
  * @param result The result array from the DB with one more item at the beginning and end.
  * @param args The pagination options that were given.
- * @param cursorKey The key that was used to order the result and is used to determine the cursor.
+ * @param cursorKey The (potentially compound) key that was used to order the result and is used to determine the cursor.
  */
 const connectionFromOverfetchedResult = <T extends object>(
     result: T[],
     { first, after }: ForwardConnectionArguments,
-    cursorKey: keyof T
+    cursorKey: CursorKey<T>
 ): Connection<T> => {
     const edges: Edge<T>[] = IterableX.from(result)
         .skip(after ? 1 : 0)
         .take(first ?? Infinity)
-        .map(node => ({ node, cursor: base64encode(cursorKey + ':' + node[cursorKey]) }))
+        .map(node => ({
+            node,
+            cursor: base64encode(cursorKey.join(',') + ':' + cursorKey.map(k => node[k]).join('')),
+        }))
         .toArray()
     return {
         edges,
@@ -187,38 +219,52 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                 { cacheKeyFn: ({ lifespan, ordinal }) => `${lifespan}#${ordinal}` }
             ),
 
-            forCommit: new DataLoader(
+            many: new DataLoader(
                 logDuration('loaders.codeSmell.forCommit', async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ repository, commit, file, kind, pathPattern, first, after }, index) => {
-                            assert(!first || first >= 0, 'Parameter first must be positive')
-                            const cursor =
-                                (after && parseCursor<CodeSmell>(after, new Set(['id']))) || undefined
-                            return {
-                                index,
-                                repository,
-                                commit,
-                                fileQuery: file ? [{ file }] : null,
-                                pathPattern: pathPattern || null,
-                                kind: kind || null,
-                                first,
-                                after: cursor?.value,
+                        specs.map(
+                            (
+                                { repository, commit, analysis, file, kind, pathPattern, first, after },
+                                index
+                            ) => {
+                                assert(!first || first >= 0, 'Parameter first must be positive')
+                                const cursor = (after && parseCursor<CodeSmell>(after, ['id'])) || undefined
+                                return {
+                                    index,
+                                    repository: repository || null,
+                                    commit: commit || null,
+                                    fileQuery: file ? [{ file }] : null,
+                                    pathPattern: pathPattern || null,
+                                    kind: kind || null,
+                                    analysis: analysis || null,
+                                    first,
+                                    after: cursor?.value,
+                                }
                             }
-                        })
+                        )
                     )
                     const result = await dbPool.query<{
                         codeSmells: [null] | (CodeSmell & { lifespanObject: CodeSmellLifespan })[]
                     }>(sql`
                         select input."index", array_agg(to_jsonb(c)) as "codeSmells"
-                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "commit" text, "repository" text, "fileQuery" jsonb, "pathPattern" text, "kind" text, "first" int, "after" uuid)
+                        from jsonb_to_recordset(${input}::jsonb) as input(
+                            "index" int,
+                            "commit" text,
+                            "repository" text,
+                            "analysis" uuid,
+                            "fileQuery" jsonb,
+                            "pathPattern" text,
+                            "kind" text,
+                            "first" int,
+                            "after" uuid
+                        )
                         left join lateral (
                             select code_smells.*, to_jsonb(code_smell_lifespans) as "lifespanObject"
                             from code_smells
                             inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
-                            -- required filters:
-                            where code_smell_lifespans.repository = input.repository
-                            and code_smells.commit = input.commit
-                            -- optional filters:
+                            where (input.repository is null or code_smell_lifespans.repository = input.repository)
+                            and (input.analysis is null or code_smell_lifespans.analysis = input.analysis)
+                            and (input.commit is null or code_smells.commit = input.commit)
                             and (input."fileQuery" is null or code_smells.locations @> input."fileQuery")
                             and (input."pathPattern" is null or exists (select "file" from jsonb_to_recordset(code_smells.locations) as locations("file" text) where "file" ~* input."pathPattern"))
                             and (input.kind is null or code_smell_lifespans.kind = input.kind)
@@ -238,30 +284,41 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                                 codeSmells = []
                             }
                             for (const codeSmell of codeSmells) {
-                                assert.strictEqual(
-                                    codeSmell.lifespanObject.repository,
-                                    spec.repository,
-                                    'Expected repository to equal input spec'
-                                )
-                                assert.strictEqual(
-                                    codeSmell.commit,
-                                    spec.commit,
-                                    'Expected commit to equal input'
-                                )
+                                if (spec.analysis) {
+                                    assert.strictEqual(
+                                        codeSmell.lifespanObject.analysis,
+                                        spec.analysis,
+                                        'Expected commit to equal input'
+                                    )
+                                }
+                                if (spec.repository) {
+                                    assert.strictEqual(
+                                        codeSmell.lifespanObject.repository,
+                                        spec.repository,
+                                        'Expected repository to equal input'
+                                    )
+                                }
+                                if (spec.commit) {
+                                    assert.strictEqual(
+                                        codeSmell.commit,
+                                        spec.commit,
+                                        'Expected commit to equal input'
+                                    )
+                                }
                                 loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
                                 loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
-                                loaders.codeSmellLifespan.byId.prime(
+                                loaders.codeSmellLifespan.oneById.prime(
                                     codeSmell.lifespan,
                                     codeSmell.lifespanObject
                                 )
                             }
-                            return connectionFromOverfetchedResult(codeSmells, spec, 'id')
+                            return connectionFromOverfetchedResult(codeSmells, spec, ['id'])
                         }
                     )
                 }),
                 {
-                    cacheKeyFn: ({ repository, commit, file, kind, first, after }) =>
-                        objectHash({ repository, commit, file, kind, first, after }),
+                    cacheKeyFn: ({ repository, commit, analysis, file, kind, first, after }) =>
+                        objectHash({ repository, commit, analysis, file, kind, first, after }),
                 }
             ),
 
@@ -274,7 +331,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         specs.map(({ lifespan, first, after }, index) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
-                                (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
+                                (after && parseCursor<CodeSmellLifespan>(after, ['id'])) || undefined
                             return { lifespan, index, first, after: cursor?.value }
                         })
                     )
@@ -302,16 +359,90 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         for (const codeSmell of instances) {
                             loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
                         }
-                        return connectionFromOverfetchedResult(instances, spec, 'id')
+                        return connectionFromOverfetchedResult(instances, spec, ['id'])
                     })
                 },
                 { cacheKeyFn: args => args.lifespan + connectionArgsKeyFn(args) }
             ),
         },
 
+        analysis: {
+            all: new DataLoader(
+                async specs => {
+                    const input = JSON.stringify(
+                        specs.map(({ first, after }, index) => {
+                            assert(!first || first >= 0, 'Parameter first must be positive')
+                            const cursor = (after && parseCursor<Analysis>(after, ['name'])) || undefined
+                            return { index, first, after: cursor?.value }
+                        })
+                    )
+                    const result = await dbPool.query<{
+                        analyses: [null] | Analysis[]
+                    }>(sql`
+                        select array_agg(to_jsonb(a)) as "analyses"
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "first" int, "after" uuid)
+                        left join lateral (
+                            select analyses.*
+                            from analyses
+                            -- pagination:
+                            where (input.after is null or analyses.id >= input.after) -- include one before to know whether there is a previous page
+                            order by "name" asc
+                            limit input.first + 1 -- query one more to know whether there is a next page
+                        ) a on true
+                        group by input."index"
+                        order by input."index"
+                    `)
+                    return result.rows.map(({ analyses }, i) => {
+                        const spec = specs[i]
+                        if (isNullArray(analyses)) {
+                            analyses = []
+                        }
+                        for (const analysis of analyses) {
+                            loaders.analysis.byId.prime(analysis.id, analysis)
+                            loaders.analysis.byName.prime(analysis.name, analysis)
+                        }
+                        return connectionFromOverfetchedResult(analyses, spec, ['name'])
+                    })
+                },
+                { cacheKeyFn: connectionArgsKeyFn }
+            ),
+            byId: new DataLoader<Analysis['id'], Analysis>(
+                logDuration('loaders.analysis.byId', async ids => {
+                    const result = await dbPool.query<Analysis | NullFields<Analysis>>(sql`
+                        select *
+                        from unnest(${ids}::uuid[]) with ordinality as input_id
+                        left join analyses on input_id = analyses.id
+                        order by input_id.ordinality
+                    `)
+                    return result.rows.map((row, i) => {
+                        if (!row.id) {
+                            return new UnknownAnalysisError({ analysis: ids[i] })
+                        }
+                        return row
+                    })
+                })
+            ),
+            byName: new DataLoader<Analysis['name'], Analysis>(
+                logDuration('loaders.analysis.byName', async names => {
+                    const result = await dbPool.query<Analysis | NullFields<Analysis>>(sql`
+                        select *
+                        from unnest(${names}::text[]) with ordinality as input
+                        left join analyses on input = analyses.name
+                        order by input.ordinality
+                    `)
+                    return result.rows.map((row, i) => {
+                        if (!row.id) {
+                            return new UnknownAnalysisError({ name: names[i] })
+                        }
+                        return row
+                    })
+                })
+            ),
+        },
+
         codeSmellLifespan: {
-            byId: new DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>(
-                logDuration('loaders.codeSmellLifespan.byId', async ids => {
+            oneById: new DataLoader<CodeSmellLifespan['id'], CodeSmellLifespan>(
+                logDuration('loaders.codeSmellLifespan.oneById', async ids => {
                     const result = await dbPool.query<CodeSmellLifespan | NullFields<CodeSmellLifespan>>(sql`
                         select *
                         from unnest(${ids}::uuid[]) with ordinality as input_id
@@ -319,42 +450,48 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         order by input_id.ordinality
                     `)
                     return result.rows.map((row, i) => {
-                        const spec: CodeSmellLifespanSpec = { lifespan: ids[i] }
                         if (!row.id) {
-                            return new UnknownCodeSmellLifespanError(spec)
+                            return new UnknownCodeSmellLifespanError({ lifespan: ids[i] })
                         }
                         return row
                     })
                 })
             ),
-
-            forRepository: new DataLoader(
+            many: new DataLoader(
                 async specs => {
                     const input = JSON.stringify(
-                        specs.map(({ repository, kind, first, after }, ordinality) => {
+                        specs.map(({ repository, analysis, kind, first, after }, index) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
-                                (after && parseCursor<CodeSmellLifespan>(after, new Set(['id']))) || undefined
-                            return { ordinality, repository, kind, first, after: cursor?.value }
+                                (after && parseCursor<CodeSmellLifespan>(after, ['id'])) || undefined
+                            return {
+                                index,
+                                repository: repository || null,
+                                analysis: analysis || null,
+                                kind: kind || null,
+                                first,
+                                after: cursor?.value,
+                            }
                         })
                     )
                     const result = await dbPool.query<{
                         lifespans: [null] | CodeSmellLifespan[]
                     }>(sql`
                         select array_agg(to_jsonb(l)) as "lifespans"
-                        from jsonb_to_recordset(${input}::jsonb) as input("ordinality" int, "repository" text, "kind" text, "first" int, "after" uuid)
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "repository" text, "analysis" uuid, "kind" text, "first" int, "after" uuid)
                         left join lateral (
                             select code_smell_lifespans.*
                             from code_smell_lifespans
-                            where code_smell_lifespans.repository = input.repository
+                            where (input.repository is null or code_smell_lifespans.repository = input.repository)
+                            and (input.analysis is null or code_smell_lifespans.analysis = input.analysis)
                             and (input.kind is null or code_smell_lifespans.kind = input.kind)
                             -- pagination:
                             and (input.after is null or code_smell_lifespans.id >= input.after) -- include one before to know whether there is a previous page
                             order by id asc
                             limit input.first + 1 -- query one more to know whether there is a next page
                         ) l on true
-                        group by input.ordinality
-                        order by input.ordinality
+                        group by input."index"
+                        order by input."index"
                     `)
                     return result.rows.map(({ lifespans }, i) => {
                         const spec = specs[i]
@@ -362,14 +499,14 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                             lifespans = []
                         }
                         for (const lifespan of lifespans) {
-                            loaders.codeSmellLifespan.byId.prime(lifespan.id, lifespan)
+                            loaders.codeSmellLifespan.oneById.prime(lifespan.id, lifespan)
                         }
-                        return connectionFromOverfetchedResult(lifespans, spec, 'id')
+                        return connectionFromOverfetchedResult(lifespans, spec, ['id'])
                     })
                 },
                 {
-                    cacheKeyFn: args =>
-                        args.repository + (args.kind ? '?kind=' + args.kind : '') + connectionArgsKeyFn(args),
+                    cacheKeyFn: ({ repository, analysis, kind, first, after }) =>
+                        objectHash({ repository, analysis, kind, first, after }),
                 }
             ),
         },
@@ -432,6 +569,45 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
             }
         ),
 
+        repository: {
+            forAnalysis: new DataLoader(
+                logDuration('loaders.repository.forAnalysis', async specs => {
+                    const cursorKey: CursorKey<RepoSpec> = ['repository']
+                    const input = JSON.stringify(
+                        specs.map(({ analysis, first, after }, index) => {
+                            assert(!first || first >= 0, 'Parameter first must be positive')
+                            const cursor = (after && parseCursor<RepoSpec>(after, [cursorKey])) || undefined
+                            return { index, analysis, first, after: cursor?.value }
+                        })
+                    )
+                    const result = await dbPool.query<{
+                        repositories: [null] | RepoSpec[]
+                    }>(sql`
+                        select array_agg(to_jsonb(l)) as "repositories"
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "analysis" uuid, "first" int, "after" text)
+                        left join lateral (
+                            select distinct "repository"
+                            from analyzed_commits
+                            where analyzed_commits.analysis = input.analysis
+                            -- pagination:
+                            and (input.after is null or analyzed_commits.repository >= input.after) -- include one before to know whether there is a previous page
+                            order by "repository" asc
+                            limit input.first + 1 -- query one more to know whether there is a next page
+                        ) l on true
+                        group by input."index"
+                        order by input."index"
+                    `)
+                    return result.rows.map(({ repositories }, i) => {
+                        const spec = specs[i]
+                        if (isNullArray(repositories)) {
+                            repositories = []
+                        }
+                        return connectionFromOverfetchedResult(repositories, spec, cursorKey)
+                    })
+                })
+            ),
+        },
+
         commit: {
             byOid: new DataLoader<RepoSpec & CommitSpec, Commit>(
                 async specs => {
@@ -467,8 +643,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         specs.map(
                             async ({ repository, first, after, startRevision, path, ...filterOptions }) => {
                                 try {
-                                    const cursor =
-                                        (after && parseCursor<Commit>(after, new Set(['oid']))) || undefined
+                                    const cursor = (after && parseCursor<Commit>(after, ['oid'])) || undefined
                                     const commits = await git
                                         .log({
                                             repoRoot,
@@ -487,7 +662,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                                     return connectionFromOverfetchedResult<Commit>(
                                         commits,
                                         { first, after },
-                                        'oid'
+                                        ['oid']
                                     )
                                 } catch (err) {
                                     return asError(err)
@@ -518,6 +693,44 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                             until,
                         }),
                 }
+            ),
+
+            forAnalysis: new DataLoader(
+                logDuration('loaders.commit.forAnalysis', async specs => {
+                    const cursorKey: CursorKey<RepoSpec & CommitSpec> = ['repository', 'commit']
+                    const input = JSON.stringify(
+                        specs.map(({ analysis, first, after }, index) => {
+                            assert(!first || first >= 0, 'Parameter first must be positive')
+                            const cursor =
+                                (after && parseCursor<CommitSpec & RepoSpec>(after, [cursorKey])) || undefined
+                            return { index, analysis, first, after: cursor?.value }
+                        })
+                    )
+                    const result = await dbPool.query<{
+                        repoCommitSpecs: [null] | (RepoSpec & CommitSpec)[]
+                    }>(sql`
+                        select array_agg(to_jsonb(c)) as "repoCommitSpecs"
+                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "analysis" uuid, "first" int, "after" text)
+                        left join lateral (
+                            select "commit", "repository"
+                            from analyzed_commits
+                            where analyzed_commits.analysis = input.analysis
+                            -- pagination:
+                            and (input.after is null or analyzed_commits."repository" || analyzed_commits."commit" >= input.after) -- include one before to know whether there is a previous page
+                            order by "repository", "commit" asc
+                            limit input.first + 1 -- query one more to know whether there is a next page
+                        ) c on true
+                        group by input."index"
+                        order by input."index"
+                    `)
+                    return result.rows.map(({ repoCommitSpecs }, i) => {
+                        const spec = specs[i]
+                        if (isNullArray(repoCommitSpecs)) {
+                            repoCommitSpecs = []
+                        }
+                        return connectionFromOverfetchedResult(repoCommitSpecs, spec, cursorKey)
+                    })
+                })
             ),
         },
     }
