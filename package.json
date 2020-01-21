@@ -3,6 +3,9 @@
   "private": true,
   "author": "Felix Becker <felix.b@outlook.com>",
   "license": "MIT",
+  "engines": {
+    "node": ">=13.6.0"
+  },
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . -w",
