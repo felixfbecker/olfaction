@@ -2,6 +2,11 @@
 hide circle
 hide empty members
 skinparam ArrowFontSize 11
+skinparam monochrome true
+skinparam style strictuml
+skinparam shadowing false
+skinparam backgroundColor transparent
+skinparam classBackgroundColor transparent
 
 class Query {
   {method} +repository(name: String!): Repository
@@ -9,9 +14,9 @@ class Query {
   {method} +codeSmell(id: ID!): CodeSmell
   {method} +codeSmellLifespan(id: ID!): CodeSmellLifespan
 }
-Query -- Repository
-Query -- CodeSmell
-Query -- CodeSmellLifespan
+Query *-- Repository
+Query *-- CodeSmell
+Query *-- CodeSmellLifespan
 
 class Repository {
   +name: String!
@@ -41,8 +46,8 @@ class CombinedFileDifference {
   +headFile: File
   +baseFiles: [File]!
 }
-CombinedFileDifference "0..*" -- "0..1" File : of >
-CombinedFileDifference "0..*" -- "0..*" File : compared to >
+CombinedFileDifference "0..*" o-- "0..1" File : of >
+CombinedFileDifference "0..*" o-- "0..*" File : compared to >
 CombinedFileDifference --> FileChangeKind : of >
 
 enum FileChangeKind {
@@ -68,14 +73,14 @@ class CodeSmell {
   +ordinal: Int!
   {method} +lifespan: CodeSmellLifespan!
 }
-CodeSmell "1..n" --> "0..n" Location : at >
+CodeSmell "0..*" o-- "1..*" Location : at >
 
 class Location {
   +file: File!
   +range: Range!
   +contents(encoding: String): String!
 }
-Location --> File : in >
+Location "0..*" --* "1" File : in >
 Location --> Range : at >
 class Range {
   +start: Position!
@@ -96,7 +101,7 @@ class CodeSmellLifespan {
   +interval: String!
   {method} +instances: Connection<CodeSmell>!
 }
-CodeSmellLifespan "1" *-- "1..n" CodeSmell
+CodeSmellLifespan "1" *-- "1..*" CodeSmell
 
 class LineCounts {
   +total: Int!

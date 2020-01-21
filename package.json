@@ -9,7 +9,8 @@
     "start": "node out/server.js",
     "prettier": "prettier --write '**/*.{ts,json,yml,graphql,md}'",
     "gen-idl": "get-graphql-schema http://localhost:4040/graphql | prettier --parser graphql > schema/schema.graphql",
-    "gen-diagrams": "plantuml -tsvg schema/*.plantuml"
+    "gen-uml": "plantuml -tsvg schema/*.plantuml",
+    "watch-uml": "chokidar --initial 'schema/**/*.plantuml' -c 'npm -s run gen-uml'"
   },
   "devDependencies": {
     "@sourcegraph/eslint-config": "^0.5.3",
@@ -27,6 +28,7 @@
     "@types/pg": "^7.11.1",
     "@types/sloc": "^0.2.0",
     "@types/uuid": "^3.4.6",
+    "chokidar-cli": "^2.1.0",
     "eslint": "^6.8.0",
     "get-graphql-schema": "^2.1.2",
     "prettier": "^1.19.1",

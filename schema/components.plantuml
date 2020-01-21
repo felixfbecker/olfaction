@@ -1,25 +1,35 @@
 @startuml components
+skinparam monochrome true
+skinparam shadowing false
+skinparam backgroundColor transparent
+skinparam classBackgroundColor transparent
 
-component Server
-package "Routes" {
-  component "REST" as REST
-  component "GraphQL" as GraphQL
-  component "Git Upload" as GitUpload
-}
-component Loaders
-component "Git DAL" as GitDAL
 
 database "Git Repositories" as GitRepos
 database "PostgreSQL DB" as Postgres
 
-Server -down-> GraphQL
-Server -down-> GitUpload
-GitUpload -down-> GitRepos
-Server -down-> REST
-REST -down-> Loaders
-GraphQL -down-> Loaders
-Loaders -left-> Postgres
-Loaders -down-> GitDAL
-GitDAL -down-> GitRepos
+() "HTTP Endpoint" as HTTP
+
+component "Application Container" {
+  component Server
+  HTTP -- Server
+  package "Routes" {
+    component "Git Upload" as GitUpload
+    component "REST" as REST
+    component "GraphQL" as GraphQL
+  }
+  component Loaders
+  component "Git DAL" as GitDAL
+
+  Server .down.> GitUpload
+  GitUpload .right.> GitRepos
+  Server .down.> GraphQL
+  Server .down.> REST
+  REST .down.> Loaders
+  GraphQL .down.> Loaders
+  Loaders .down..> Postgres
+  Loaders .down.> GitDAL
+  GitDAL ..> GitRepos
+}
 
 @enduml

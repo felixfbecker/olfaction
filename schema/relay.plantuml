@@ -1,19 +1,32 @@
 @startuml relay
 hide circle
 hide empty members
+skinparam monochrome true
+skinparam style strictuml
+skinparam shadowing false
+skinparam backgroundColor transparent
+skinparam classBackgroundColor transparent
 
 namespace Relay {
+  interface ForwardConnectionArguments {
+    first: Int
+    after: String
+  }
+
   interface Connection<TNode> {
     +pageInfo: PageInfo!
     +edges: [Edge<TNode>!]!
   }
+
   Connection --> Edge
   Connection --> PageInfo
+
   class PageInfo {
     +endCursor: String!
     +hasNextPage: Boolean!
     +hasPreviousPage: Boolean!
   }
+
   interface Edge<TNode> {
     +node: TNode!
     +cursor: String!

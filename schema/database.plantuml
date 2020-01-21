@@ -1,6 +1,11 @@
 @startuml database
 hide circle
 hide empty members
+skinparam monochrome true
+skinparam style strictuml
+skinparam shadowing false
+skinparam backgroundColor transparent
+skinparam classBackgroundColor transparent
 
 entity code_smell_lifespans {
   *id UUID <<PK>>
