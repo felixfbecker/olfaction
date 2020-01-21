@@ -31,7 +31,7 @@ class Analysis {
 
 class Repository {
   +name: String!
-  {method} +commit(oid: String!): Commit
+  {method} +commit(oid: GitObjectID!): Commit
   {method} +commits: Connection<Commit>!
   {method} +codeSmellLifespans: Connection<CodeSmellLifespan>!
 }
@@ -40,7 +40,7 @@ Repository "1" *-- "0..*" CodeSmellLifespan
 Analysis "0..*" o-- "0..*" Repository : analyzed >
 
 class Commit {
-  +oid: String!
+  +oid: GitObjectID!
   +committer: Signature!
   +author: Signature!
   +parents: [Commit!]!
