@@ -382,6 +382,11 @@ export interface GitLogFilters {
     path?: string
 }
 
+export interface GitLogPagination {
+    skip?: number
+    maxCount?: number
+}
+
 export const log = ({
     repoRoot,
     repository,
@@ -390,7 +395,9 @@ export const log = ({
     messagePattern,
     since,
     until,
-}: RepoRootSpec & RepoSpec & GitLogFilters): AsyncIterableX<Commit> => {
+    skip,
+    maxCount,
+}: RepoRootSpec & RepoSpec & GitLogFilters & GitLogPagination): AsyncIterableX<Commit> => {
     if (startRevision.includes('..')) {
         throw new Error(`Start revision cannot be a revision range: ${startRevision}`)
     }
@@ -406,6 +413,8 @@ export const log = ({
                 : []),
             ...(since ? [`--since=${since}`] : []),
             ...(until ? [`--until=${until}`] : []),
+            ...(skip ? [`--skip=${skip}`] : []),
+            ...(maxCount ? [`--max-count=${maxCount}`] : []),
             startRevision,
             '--',
             ...(path ? [path] : []),

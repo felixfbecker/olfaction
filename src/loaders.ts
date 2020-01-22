@@ -28,7 +28,15 @@ import {
     CursorKey,
 } from './util'
 import assert from 'assert'
-import { Connection, Edge, ConnectionArguments } from 'graphql-relay'
+import {
+    Connection,
+    Edge,
+    ConnectionArguments,
+    connectionFromArraySlice,
+    cursorToOffset,
+    getOffsetWithDefault,
+    offsetToCursor,
+} from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
 import {
     UnknownCodeSmellError,
@@ -128,6 +136,9 @@ const repoAtCommitCacheKeyFn = ({ repository, commit }: RepoSpec & CommitSpec): 
 const fileKeyFn = ({ file }: Partial<FileSpec>): string => (file ? `#${file}` : '')
 const connectionArgsKeyFn = ({ first, after }: ForwardConnectionArguments): string => `*${after}+${first}`
 
+export const makeCursorFromKey = <T extends object>(cursorKey: CursorKey<T>) => (node: T) =>
+    base64encode(cursorKey.join(',') + ':' + cursorKey.map(k => node[k]).join(''))
+
 /**
  * Creates a connection from a DB result page that was fetched with one more
  * item before and after than requested (if possible), which will be stripped
@@ -140,15 +151,14 @@ const connectionArgsKeyFn = ({ first, after }: ForwardConnectionArguments): stri
 const connectionFromOverfetchedResult = <T extends object>(
     result: T[],
     { first, after }: ForwardConnectionArguments,
-    cursorKey: CursorKey<T>
+    cursorStrategy: CursorKey<T> | ((node: T, index: number) => string)
 ): Connection<T> => {
+    const makeCursor =
+        typeof cursorStrategy === 'function' ? cursorStrategy : makeCursorFromKey(cursorStrategy)
     const edges: Edge<T>[] = IterableX.from(result)
+        .map((node, index) => ({ node, cursor: makeCursor(node, index) }))
         .skip(after ? 1 : 0)
         .take(first ?? Infinity)
-        .map(node => ({
-            node,
-            cursor: base64encode(cursorKey.join(',') + ':' + cursorKey.map(k => node[k]).join('')),
-        }))
         .toArray()
     return {
         edges,
@@ -649,13 +659,19 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         specs.map(
                             async ({ repository, first, after, startRevision, path, ...filterOptions }) => {
                                 try {
-                                    const cursor = (after && parseCursor<Commit>(after, ['oid'])) || undefined
+                                    const afterOffset = (after && cursorToOffset(after)) || 0
+                                    assert(
+                                        !afterOffset || (!isNaN(afterOffset) && afterOffset >= 0),
+                                        'Invalid cursor'
+                                    )
                                     const commits = await git
                                         .log({
+                                            ...filterOptions,
                                             repoRoot,
                                             repository,
-                                            startRevision: cursor?.value ?? startRevision,
-                                            ...filterOptions,
+                                            startRevision,
+                                            skip: afterOffset,
+                                            maxCount: typeof first === 'number' ? first + 1 : undefined,
                                         })
                                         .tap((commit: Commit) =>
                                             loaders.commit.byOid.prime(
@@ -663,12 +679,12 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                                                 commit
                                             )
                                         )
-                                        .take(typeof first === 'number' ? first + 1 : Infinity)
                                         .toArray()
+
                                     return connectionFromOverfetchedResult<Commit>(
                                         commits,
                                         { first, after },
-                                        ['oid']
+                                        (node, index) => offsetToCursor(afterOffset + index)
                                     )
                                 } catch (err) {
                                     return asError(err)
