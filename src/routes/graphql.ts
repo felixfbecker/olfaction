@@ -694,6 +694,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                 pMap(codeSmells, async ({ kind, message, locations, lifespan, ordinal }) => {
                                     // Normalization
                                     message = message?.trim() || null
+                                    locations = locations || []
                                     for (const location of locations) {
                                         if (path.posix.isAbsolute(location.file)) {
                                             throw new Error(

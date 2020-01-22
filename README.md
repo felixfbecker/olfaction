@@ -31,3 +31,22 @@ npm start
 
 - NodeJS >=13.6.0
 - PostgreSQL 12.1
+
+## Set up database
+
+Make sure the above environment variables are set.
+
+Create a database with PostgreSQL:
+
+```sh
+createdb olfaction
+```
+
+Then initialize the schema:
+
+```sh
+psql < ./schema/schema.sql
+```
+
+Performance recommendation:
+Raise `work_mem` from its default of 4MB in PostgreSQL config, e.g. to `1 GB` (depending on available memory).

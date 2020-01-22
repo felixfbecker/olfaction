@@ -88,7 +88,7 @@ export interface CodeSmellInput {
     ordinal: number
     kind: string
     message: string | null
-    locations: Location[]
+    locations: Location[] | null
 }
 
 export interface File {
