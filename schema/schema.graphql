@@ -1,3 +1,34 @@
+input AddCodeSmellsInput {
+  """
+  The repository to add code smells for.
+  """
+  repository: String!
+
+  """
+  The commit to add code smells for.
+  """
+  commit: String!
+
+  """
+  The analysis the code smells should be added to.
+  """
+  analysis: ID!
+
+  """
+  The code smells to add.
+  """
+  codeSmells: [CodeSmellInput!]!
+  clientMutationId: String
+}
+
+type AddCodeSmellsPayload {
+  """
+  The created code smells.
+  """
+  codeSmells: [CodeSmell!]!
+  clientMutationId: String
+}
+
 type Analysis {
   """
   The unique name of the analysis
@@ -353,6 +384,55 @@ type CommitEdge {
   cursor: String!
 }
 
+input CreateAnalysisInput {
+  name: String!
+  clientMutationId: String
+}
+
+type CreateAnalysisPayload {
+  analysis: Analysis!
+  clientMutationId: String
+}
+
+input DeleteAnalysisInput {
+  name: String!
+  clientMutationId: String
+}
+
+type DeleteAnalysisPayload {
+  clientMutationId: String
+}
+
+input DeleteCodeSmellInput {
+  id: ID!
+  clientMutationId: String
+}
+
+input DeleteCodeSmellLifespanInput {
+  id: ID!
+  clientMutationId: String
+}
+
+type DeleteCodeSmellLifespanPayload {
+  clientMutationId: String
+}
+
+type DeleteCodeSmellPayload {
+  clientMutationId: String
+}
+
+input DeleteRepositoryInput {
+  """
+  The repository to delete.
+  """
+  repository: String!
+  clientMutationId: String
+}
+
+type DeleteRepositoryPayload {
+  clientMutationId: String
+}
+
 type File {
   path: String!
 
@@ -504,7 +584,35 @@ input LocationInput {
 }
 
 type Mutation {
-  addCodeSmells(repository: String!, commit: String!, codeSmells: [CodeSmellInput!]!): [CodeSmell!]!
+  """
+  Create an analysis to add code smells to.
+  """
+  createAnalysis(input: CreateAnalysisInput!): CreateAnalysisPayload
+
+  """
+  Add code smells for a commit of a repository to an analysis.
+  """
+  addCodeSmells(input: AddCodeSmellsInput!): AddCodeSmellsPayload
+
+  """
+  Delete an analysis and all its code smells. Repositories are not deleted.
+  """
+  deleteAnalysis(input: DeleteAnalysisInput!): DeleteAnalysisPayload
+
+  """
+  Delete a repository and all its code smells.
+  """
+  deleteRepository(input: DeleteRepositoryInput!): DeleteRepositoryPayload
+
+  """
+  Delete a code smell instance.
+  """
+  deleteCodeSmell(input: DeleteCodeSmellInput!): DeleteCodeSmellPayload
+
+  """
+  Delete a code smell lifespan and its instances.
+  """
+  deleteCodeSmellLifespan(input: DeleteCodeSmellLifespanInput!): DeleteCodeSmellLifespanPayload
 }
 
 """

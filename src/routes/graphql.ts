@@ -21,6 +21,7 @@ import {
     checkCommitExists,
     validateObjectID,
     GitLogFilters,
+    resolveRepoDir,
 } from '../git'
 import sql from 'sql-template-strings'
 import {
@@ -48,16 +49,25 @@ import {
     ChangeKind,
     Analysis,
     AnalysisName,
+    CodeSmellSpec,
+    CodeSmellLifespanSpec,
 } from '../models'
 import { transaction, mapConnectionNodes, logDuration, DBContext, withDBConnection } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
-import { connectionDefinitions, forwardConnectionArgs, Connection, connectionFromArray } from 'graphql-relay'
+import {
+    connectionDefinitions,
+    forwardConnectionArgs,
+    Connection,
+    connectionFromArray,
+    mutationWithClientMutationId,
+} from 'graphql-relay'
 import { last, identity, sortBy } from 'lodash'
 import sloc from 'sloc'
 import * as path from 'path'
-import { UnknownCodeSmellError } from '../errors'
+import { UnknownCodeSmellError, UnknownCodeSmellLifespanError, UnknownAnalysisError } from '../errors'
 import pMap from 'p-map'
+import rmfr from 'rmfr'
 
 type GraphQLArg<T> = T extends undefined ? Exclude<T, undefined> | null : T
 /**
@@ -615,20 +625,185 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         mutation: new GraphQLObjectType({
             name: 'Mutation',
             fields: {
-                addCodeSmells: {
-                    args: {
+                createAnalysis: mutationWithClientMutationId({
+                    name: 'CreateAnalysis',
+                    description: 'Create an analysis to add code smells to.',
+                    inputFields: {
+                        name: {
+                            type: GraphQLNonNull(GraphQLString),
+                            description: 'A unique name for the analysis to address it by.',
+                        },
+                    },
+                    outputFields: {
+                        analysis: {
+                            type: GraphQLNonNull(AnalysisType),
+                            description: 'The created analysis.',
+                        },
+                    },
+                    mutateAndGetPayload: async ({ name }: AnalysisName) => {
+                        const result = await dbPool.query<Analysis>(
+                            sql`insert into analyses ("name") values (${name}) returning "id", "name"`
+                        )
+                        return { analysis: new AnalysisResolver(result.rows[0]) }
+                    },
+                }),
+                addCodeSmells: mutationWithClientMutationId({
+                    name: 'AddCodeSmells',
+                    description: 'Add code smells for a commit of a repository to an analysis.',
+                    inputFields: {
                         repository: {
+                            description: 'The repository to add code smells for.',
                             type: GraphQLNonNull(GraphQLString),
                         },
                         commit: {
+                            description: 'The commit to add code smells for.',
                             type: GraphQLNonNull(GraphQLString),
                         },
+                        analysis: {
+                            description: 'The analysis the code smells should be added to.',
+                            type: GraphQLNonNull(GraphQLID),
+                        },
                         codeSmells: {
+                            description: 'The code smells to add.',
                             type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellInputType))),
                         },
                     },
-                    type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellType))),
-                },
+                    outputFields: {
+                        codeSmells: {
+                            type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellType))),
+                            description: 'The created code smells.',
+                        },
+                    },
+                    mutateAndGetPayload: async (
+                        {
+                            repository,
+                            commit,
+                            codeSmells,
+                        }: {
+                            repository: string
+                            commit: string
+                            codeSmells: CodeSmellInput[]
+                        },
+                        { loaders }: Context
+                    ) => {
+                        await checkRepositoryExists({ repository, repoRoot })
+                        await checkCommitExists({ repository, commit, repoRoot })
+                        const codeSmellResolvers = await withDBConnection(dbPool, db =>
+                            transaction(db, () =>
+                                pMap(codeSmells, async ({ kind, message, locations, lifespan, ordinal }) => {
+                                    // Normalization
+                                    message = message?.trim() || null
+                                    for (const location of locations) {
+                                        if (path.posix.isAbsolute(location.file)) {
+                                            throw new Error(
+                                                `File path must be relative to repository root: ${location.file}`
+                                            )
+                                        }
+                                        location.file = path.normalize(location.file)
+                                    }
+                                    locations = sortBy(locations, [
+                                        l => l.file,
+                                        l => l.range.start.line,
+                                        l => l.range.start.character,
+                                        l => l.range.end.line,
+                                        l => l.range.end.character,
+                                    ])
+
+                                    const locationsJson = JSON.stringify(locations)
+
+                                    // Get or create lifespan with ID passed from client
+                                    const lifespanResult = await db.query<{ id: UUID }>(sql`
+                                        insert into code_smell_lifespans (id, kind, repository)
+                                        values (${lifespan}, ${kind}, ${repository})
+                                        on conflict on constraint code_smell_lifespans_pkey do nothing
+                                        returning id
+                                    `)
+                                    const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
+                                    const result = await db.query<CodeSmell>(sql`
+                                        insert into code_smells
+                                                    ("commit", "message", locations, lifespan, ordinal)
+                                        values      (${commit}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
+                                        returning   id, "commit", "message", locations, lifespan, ordinal
+                                    `)
+                                    const codeSmell = result.rows[0]
+                                    loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
+                                    loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
+                                    return new CodeSmellResolver(codeSmell)
+                                })
+                            )
+                        )
+                        return { codeSmells: codeSmellResolvers }
+                    },
+                }),
+                deleteAnalysis: mutationWithClientMutationId({
+                    name: 'DeleteAnalysis',
+                    description: 'Delete an analysis and all its code smells. Repositories are not deleted.',
+                    inputFields: { name: { type: GraphQLNonNull(GraphQLString) } },
+                    outputFields: {},
+                    mutateAndGetPayload: async ({ name }: AnalysisName) => {
+                        const result = await dbPool.query(sql`delete from analyses where "name" = ${name}`)
+                        if (result.rowCount === 0) {
+                            throw new UnknownAnalysisError({ name })
+                        }
+                        return {}
+                    },
+                }),
+                deleteRepository: mutationWithClientMutationId({
+                    name: 'DeleteRepository',
+                    description: 'Delete a repository and all its code smells.',
+                    inputFields: {
+                        repository: {
+                            type: GraphQLNonNull(GraphQLString),
+                            description: 'The repository to delete.',
+                        },
+                    },
+                    outputFields: {},
+                    mutateAndGetPayload: async ({ repository }: RepoSpec) => {
+                        await checkRepositoryExists({ repository, repoRoot })
+                        await withDBConnection(dbPool, async db => {
+                            await transaction(db, async () => {
+                                await db.query(
+                                    sql`delete from code_smell_lifespans where repository = ${repository}`
+                                )
+                                await db.query(
+                                    sql`delete from analyzed_commits where repository = ${repository}`
+                                )
+                            })
+                            await rmfr(resolveRepoDir({ repoRoot, repository }))
+                        })
+                        return {}
+                    },
+                }),
+                deleteCodeSmell: mutationWithClientMutationId({
+                    name: 'DeleteCodeSmell',
+                    description: 'Delete a code smell instance.',
+                    inputFields: { id: { type: GraphQLNonNull(GraphQLID) } },
+                    outputFields: {},
+                    mutateAndGetPayload: async ({ codeSmell }: CodeSmellSpec) => {
+                        const result = await dbPool.query(
+                            sql`delete from code_smells where id = ${codeSmell}`
+                        )
+                        if (result.rowCount === 0) {
+                            throw new UnknownCodeSmellError({ codeSmell })
+                        }
+                        return {}
+                    },
+                }),
+                deleteCodeSmellLifespan: mutationWithClientMutationId({
+                    name: 'DeleteCodeSmellLifespan',
+                    description: 'Delete a code smell lifespan and its instances.',
+                    inputFields: { id: { type: GraphQLNonNull(GraphQLID) } },
+                    outputFields: {},
+                    mutateAndGetPayload: async ({ lifespan }: CodeSmellLifespanSpec) => {
+                        const result = await dbPool.query(
+                            sql`delete from code_smell_lifespans where id = ${lifespan}`
+                        )
+                        if (result.rowCount === 0) {
+                            throw new UnknownCodeSmellLifespanError({ lifespan })
+                        }
+                        return {}
+                    },
+                }),
             },
         }),
     })
@@ -1009,77 +1184,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         },
     }
 
-    const mutation = {
-        async addCodeSmells(
-            {
-                repository,
-                commit,
-                codeSmells,
-            }: {
-                repository: string
-                commit: string
-                codeSmells: CodeSmellInput[]
-            },
-            { loaders }: Context
-        ): Promise<CodeSmellResolver[]> {
-            await checkRepositoryExists({ repository, repoRoot })
-            await checkCommitExists({ repository, commit, repoRoot })
-
-            return withDBConnection(dbPool, db =>
-                transaction(db, () =>
-                    Promise.all(
-                        codeSmells.map(async ({ kind, message, locations, lifespan, ordinal }) => {
-                            // Normalization
-                            message = message?.trim() || null
-                            for (const location of locations) {
-                                if (path.posix.isAbsolute(location.file)) {
-                                    throw new Error(
-                                        `File path must be relative to repository root: ${location.file}`
-                                    )
-                                }
-                                location.file = path.normalize(location.file)
-                            }
-                            locations = sortBy(locations, [
-                                l => l.file,
-                                l => l.range.start.line,
-                                l => l.range.start.character,
-                                l => l.range.end.line,
-                                l => l.range.end.character,
-                            ])
-
-                            const locationsJson = JSON.stringify(locations)
-
-                            // Get or create lifespan with ID passed from client
-                            const lifespanResult = await db.query<{ id: UUID }>(sql`
-                                insert into code_smell_lifespans (id, kind, repository)
-                                values (${lifespan}, ${kind}, ${repository})
-                                on conflict on constraint code_smell_lifespans_pkey do nothing
-                                returning id
-                            `)
-                            const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
-                            const result = await db.query<CodeSmell>(sql`
-                                insert into code_smells
-                                            ("commit", "message", locations, lifespan, ordinal)
-                                values      (${commit}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
-                                returning   id, "commit", "message", locations, lifespan, ordinal
-                            `)
-                            const codeSmell = result.rows[0]
-                            loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
-                            loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
-                            return new CodeSmellResolver(codeSmell)
-                        })
-                    )
-                )
-            )
-        },
-    }
-
-    const rootValue = {
-        ...query,
-        ...mutation,
-    }
-
-    return { schema, rootValue }
+    return { schema, rootValue: query }
 }
 
 export const createGraphQLContext = (options: DBContext & RepoRootSpec) => ({
