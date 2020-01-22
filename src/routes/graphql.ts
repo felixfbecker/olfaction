@@ -465,6 +465,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             id: {
                 type: GraphQLNonNull(GraphQLID),
             },
+            kind: {
+                description: 'The kind of code smell.',
+                type: GraphQLNonNull(GraphQLString),
+            },
             instances: {
                 args: forwardConnectionArgs,
                 type: GraphQLNonNull(CodeSmellConnectionType),
