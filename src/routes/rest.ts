@@ -67,6 +67,191 @@ export const createRestRouter = ({
         })
     )
 
+    router.get<{}>(
+        '/analyses',
+        wrap(async (req, res) => {
+            const { first, after } = req.query
+            const query = gql`
+                query($first: Int, $after: String) {
+                    analyses(first: $first, after: $after) {
+                        edges {
+                            node {
+                                name
+                            }
+                        }
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                    }
+                }
+            `
+            const contextValue = createGraphQLContext({ dbPool, repoRoot })
+            const data = dataOrErrors(
+                await graphql({
+                    ...graphQLHandler,
+                    contextValue,
+                    source: query,
+                    variableValues: {
+                        first: first && parseInt(first, 10),
+                        after,
+                    },
+                })
+            )
+            const connection: Connection<{ name: string }> = data.analyses
+            addLinkHeaderForConnection(req, res, connection)
+            const repositories = connection.edges.map(edge => edge.node)
+            res.json(repositories)
+        })
+    )
+
+    router.get<{ name: string }>(
+        '/analyses/:name/analyzed-commits',
+        wrap(async (req, res) => {
+            const { name } = req.params
+            const { first, after } = req.query
+            const query = gql`
+                query($name: String!, $first: Int, $after: String) {
+                    analysis(name: $name) {
+                        analyzedCommits(first: $first, after: $after) {
+                            edges {
+                                node {
+                                    oid
+                                    message
+                                    author {
+                                        name
+                                        date
+                                        email
+                                    }
+                                    committer {
+                                        name
+                                        date
+                                        email
+                                    }
+                                    parents {
+                                        oid
+                                    }
+                                }
+                            }
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
+                        }
+                    }
+                }
+            `
+            const contextValue = createGraphQLContext({ dbPool, repoRoot })
+            const data = dataOrErrors(
+                await graphql({
+                    ...graphQLHandler,
+                    contextValue,
+                    source: query,
+                    variableValues: {
+                        name,
+                        first: first && parseInt(first, 10),
+                        after,
+                    },
+                })
+            )
+            const connection: Connection<unknown> = data.analysis.analyzedCommits
+            addLinkHeaderForConnection(req, res, connection)
+            const repositories = connection.edges.map(edge => edge.node)
+            res.json(repositories)
+        })
+    )
+
+    router.get<{ name: string }>(
+        '/analyses/:name/analyzed-repositories',
+        wrap(async (req, res) => {
+            const { name } = req.params
+            const { first, after } = req.query
+            const query = gql`
+                query($name: String!, $first: Int, $after: String) {
+                    analysis(name: $name) {
+                        analyzedRepositories(first: $first, after: $after) {
+                            edges {
+                                node {
+                                    name
+                                }
+                                pageInfo {
+                                    hasNextPage
+                                    endCursor
+                                }
+                            }
+                        }
+                    }
+                }
+            `
+            const contextValue = createGraphQLContext({ dbPool, repoRoot })
+            const data = dataOrErrors(
+                await graphql({
+                    ...graphQLHandler,
+                    contextValue,
+                    source: query,
+                    variableValues: {
+                        name,
+                        first: first && parseInt(first, 10),
+                        after,
+                    },
+                })
+            )
+            const connection: Connection<unknown> = data.analysis.analyzedRepositories
+            addLinkHeaderForConnection(req, res, connection)
+            const repositories = connection.edges.map(edge => edge.node)
+            res.json(repositories)
+        })
+    )
+
+    router.get<{ name: string }>(
+        '/analyses/:name/code-smell-lifespans',
+        wrap(async (req, res) => {
+            const { name } = req.params
+            const { first, after, kind } = req.query
+            const query = gql`
+                query($name: String!, $kind: String, $first: Int, $after: String) {
+                    analysis(name: $name) {
+                        codeSmellLifespans(kind: $kind, first: $first, after: $after) {
+                            edges {
+                                node {
+                                    id
+                                    kind
+                                    interval
+                                    duration
+                                    repository {
+                                        name
+                                    }
+                                }
+                                pageInfo {
+                                    hasNextPage
+                                    endCursor
+                                }
+                            }
+                        }
+                    }
+                }
+            `
+            const contextValue = createGraphQLContext({ dbPool, repoRoot })
+            const data = dataOrErrors(
+                await graphql({
+                    ...graphQLHandler,
+                    contextValue,
+                    source: query,
+                    variableValues: {
+                        name,
+                        kind,
+                        first: first && parseInt(first, 10),
+                        after,
+                    },
+                })
+            )
+            const connection: Connection<unknown> = data.analysis.codeSmellLifespans
+            addLinkHeaderForConnection(req, res, connection)
+            const repositories = connection.edges.map(edge => edge.node)
+            res.json(repositories)
+        })
+    )
+
     router.get<{ repository: string }>(
         '/repositories/:repository/commits',
         wrap(async (req, res) => {
@@ -105,7 +290,9 @@ export const createRestRouter = ({
                                         date
                                         email
                                     }
-                                    #parents
+                                    parents {
+                                        oid
+                                    }
                                 }
                             }
                             pageInfo {
@@ -160,7 +347,9 @@ export const createRestRouter = ({
                                 date
                                 email
                             }
-                            #parents
+                            parents {
+                                oid
+                            }
                         }
                     }
                 }
@@ -249,6 +438,9 @@ export const createRestRouter = ({
                                     kind
                                     interval
                                     duration
+                                    analysis {
+                                        name
+                                    }
                                 }
                             }
                             pageInfo {
@@ -364,6 +556,9 @@ export const createRestRouter = ({
                         kind
                         interval
                         duration
+                        analysis {
+                            name
+                        }
                     }
                 }
             `
@@ -433,7 +628,9 @@ export const createRestRouter = ({
                                             date
                                             email
                                         }
-                                        #parents
+                                        parents {
+                                            oid
+                                        }
                                     }
                                 }
                             }
