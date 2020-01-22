@@ -29,33 +29,6 @@ export const createRestRouter = ({
 }: RepoRootSpec & DBContext & { graphQLHandler: GraphQLHandler }): Router => {
     const router = Router()
 
-    router.post<{ repository: string; commit: string }>(
-        '/repositories/:repository/commits/:commit/code-smells',
-        wrap(async (req, res) => {
-            const { repository, commit } = req.params
-            const { kind, message, locations } = req.body
-
-            await git.checkRepositoryExists({ repository, repoRoot })
-            await git.checkCommitExists({ repository, commit, repoRoot })
-            const commitData = (await git.getCommits({ repository, commitOids: [commit], repoRoot })).get(
-                commit
-            )
-            const result = await dbPool.query(sql`
-                INSERT INTO code_smells (kind, "message", locations, commit_id, commit_date)
-                VALUES (${kind}, ${message}, ${locations}, ${commit}, ${commitData!.committer.date})
-                RETURNING id
-            `)
-            const codeSmell = {
-                id: result.rows[0].id,
-                kind,
-                message,
-                locations,
-            }
-
-            res.status(HttpStatus.CREATED).json(codeSmell)
-        })
-    )
-
     router.get<{}>(
         '/repositories',
         wrap(async (req, res) => {
