@@ -26,3 +26,8 @@ npm start
 | `PGUSER`     |             | Postgres database user name                                      |
 | `PGPASSWORD` |             | Postgres database password                                       |
 | `PGDATABASE` |             | Postgres database name                                           |
+
+## Requirements
+
+- NodeJS >=13.6.0
+- PostgreSQL 12.1
