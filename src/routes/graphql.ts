@@ -51,6 +51,7 @@ import {
     AnalysisName,
     CodeSmellSpec,
     CodeSmellLifespanSpec,
+    GitObjectID,
 } from '../models'
 import { transaction, mapConnectionNodes, logDuration, DBContext, withDBConnection } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
@@ -841,7 +842,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     edges,
                     async ({ node, cursor }) => {
                         const commit = await loaders.commit.byOid.load(node)
-                        return { node: createCommitResolver(node, commit), cursor }
+                        return { node: new CommitResolver(node, commit), cursor }
                     },
                     { concurrency: 100 }
                 ),
@@ -875,14 +876,12 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 path: args.path || undefined,
                 repository: this.name,
             })
-            return mapConnectionNodes(connection, node =>
-                createCommitResolver({ repository: this.name }, node)
-            )
+            return mapConnectionNodes(connection, node => new CommitResolver({ repository: this.name }, node))
         }
 
         async commit({ oid }: { oid: string }, { loaders }: Context) {
             const commit = await loaders.commit.byOid.load({ repository: this.name, commit: oid })
-            return createCommitResolver({ repository: this.name }, commit)
+            return new CommitResolver({ repository: this.name }, commit)
         }
 
         async codeSmellLifespans(
@@ -1002,7 +1001,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         async commit(args: {}, { loaders }: Context): Promise<CommitResolver> {
             const { repository } = (await loaders.codeSmellLifespan.oneById.load(this.codeSmell.lifespan))!
             const commit = await loaders.commit.byOid.load({ repository, commit: this.codeSmell.commit })
-            return createCommitResolver({ repository }, commit)
+            return new CommitResolver({ repository }, commit)
         }
 
         async locations(args: {}, { loaders }: Context) {
@@ -1039,74 +1038,90 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         }
     }
 
-    const createCommitResolver = ({ repository }: RepoSpec, commit: Commit) => {
-        const spec = { repository, commit: commit.oid }
-        return {
-            ...commit,
-            parents: async (args: {}, { loaders }: Context) => {
-                const parentCommits = await loaders.commit.byOid.loadMany(
-                    commit.parents.map(parentOid => ({ repository, commit: parentOid }))
-                )
-                return parentCommits.map(parent => createCommitResolver({ repository }, parent))
-            },
-            repository: () => new RepositoryResolver(repository),
-            subject: (): string => commit.message.split('\n', 1)[0],
-            combinedFileDifferences: async (args: ForwardConnectionArguments, { loaders }: Context) => {
-                const fileDifferences = await loaders.combinedFileDifference.forCommit.load(spec)
-                return connectionFromArray(
-                    fileDifferences.map(difference => ({
-                        changeKinds: difference.changeKinds,
-                        headFile: () =>
-                            difference.headPath && new FileResolver({ ...spec, file: difference.headPath }),
-                        baseFiles: () =>
-                            difference.basePaths.map(
-                                basePath => basePath && new FileResolver({ ...spec, file: basePath })
-                            ),
-                    })),
-                    args
-                )
-            },
-            // fileDifferences: async (args: {}, { loaders }: Context) => {
-            //     const fileDifferences = await loaders.fileDifference.forCommit.load(spec)
-            //     return fileDifferences.map(differencesToParent =>
-            //         differencesToParent.map(difference => ({
-            //             changeKind: difference.changeKind,
-            //             headFile: () =>
-            //                 difference.newPath && new FileResolver({ ...spec, file: difference.headPath }),
-            //             baseFile: () =>
-            //                 difference.oldPath && new FileResolver({ ...spec, file: difference.basePath }),
-            //         }))
-            //     )
-            // },
-            async codeSmells(
-                args: GraphQLArgs<ForwardConnectionArguments & KindFilter & PathPatternFilter>,
-                { loaders }: Context
-            ): Promise<Connection<CodeSmellResolver>> {
-                const connection = await loaders.codeSmell.many.load({ ...spec, ...args })
-                return mapConnectionNodes(connection, node => new CodeSmellResolver(node))
-            },
-            async files(
-                {
-                    directory,
-                    pathPattern,
-                    ...connectionArgs
-                }: GraphQLArgs<ForwardConnectionArguments & DirectoryFilter & PathPatternFilter>,
-                { loaders }: Context
-            ): Promise<Connection<FileResolver>> {
-                let files = await loaders.files.load({ repository, commit: commit.oid, directory })
-                if (pathPattern) {
-                    const regex = new RegExp(pathPattern, 'i')
-                    files = files.filter(file => regex.test(file.path))
-                }
+    class CommitResolver {
+        private spec: RepoSpec & CommitSpec
+        constructor({ repository }: RepoSpec, private commit: Commit) {
+            this.spec = { repository, commit: commit.oid }
+        }
+        oid(): GitObjectID {
+            return this.commit.oid
+        }
+        author(): Signature {
+            return this.commit.author
+        }
+        committer(): Signature {
+            return this.commit.committer
+        }
+        message(): string {
+            return this.commit.message
+        }
 
-                return connectionFromArray(
-                    files.map(file => new FileResolver({ ...spec, file: file.path })),
-                    connectionArgs
-                )
-            },
+        subject(): string {
+            return this.commit.message.split('\n', 1)[0]
+        }
+        async parents(args: {}, { loaders }: Context) {
+            const parentCommits = await loaders.commit.byOid.loadMany(
+                this.commit.parents.map(parentOid => ({ ...this.spec, commit: parentOid }))
+            )
+            return parentCommits.map(parent => new CommitResolver(this.spec, parent))
+        }
+        repository() {
+            return new RepositoryResolver(this.spec.repository)
+        }
+        async combinedFileDifferences(args: ForwardConnectionArguments, { loaders }: Context) {
+            const fileDifferences = await loaders.combinedFileDifference.forCommit.load(this.spec)
+            return connectionFromArray(
+                fileDifferences.map(difference => ({
+                    changeKinds: difference.changeKinds,
+                    headFile: () =>
+                        difference.headPath && new FileResolver({ ...this.spec, file: difference.headPath }),
+                    baseFiles: () =>
+                        difference.basePaths.map(
+                            basePath => basePath && new FileResolver({ ...this.spec, file: basePath })
+                        ),
+                })),
+                args
+            )
+        }
+        // fileDifferences: async (args: {}, { loaders }: Context) => {
+        //     const fileDifferences = await loaders.fileDifference.forCommit.load(spec)
+        //     return fileDifferences.map(differencesToParent =>
+        //         differencesToParent.map(difference => ({
+        //             changeKind: difference.changeKind,
+        //             headFile: () =>
+        //                 difference.newPath && new FileResolver({ ...spec, file: difference.headPath }),
+        //             baseFile: () =>
+        //                 difference.oldPath && new FileResolver({ ...spec, file: difference.basePath }),
+        //         }))
+        //     )
+        // },
+        async codeSmells(
+            args: GraphQLArgs<ForwardConnectionArguments & KindFilter & PathPatternFilter>,
+            { loaders }: Context
+        ): Promise<Connection<CodeSmellResolver>> {
+            const connection = await loaders.codeSmell.many.load({ ...this.spec, ...args })
+            return mapConnectionNodes(connection, node => new CodeSmellResolver(node))
+        }
+        async files(
+            {
+                directory,
+                pathPattern,
+                ...connectionArgs
+            }: GraphQLArgs<ForwardConnectionArguments & DirectoryFilter & PathPatternFilter>,
+            { loaders }: Context
+        ): Promise<Connection<FileResolver>> {
+            let files = await loaders.files.load({ ...this.spec, directory })
+            if (pathPattern) {
+                const regex = new RegExp(pathPattern, 'i')
+                files = files.filter(file => regex.test(file.path))
+            }
+
+            return connectionFromArray(
+                files.map(file => new FileResolver({ ...this.spec, file: file.path })),
+                connectionArgs
+            )
         }
     }
-    type CommitResolver = ReturnType<typeof createCommitResolver>
 
     interface EncodingArgs {
         encoding: string | null
@@ -1127,7 +1142,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
 
         async commit(args: {}, { loaders }: Context) {
             const commit = await loaders.commit.byOid.load(this.spec)
-            return createCommitResolver(this.spec, commit)
+            return new CommitResolver(this.spec, commit)
         }
 
         async codeSmells(args: ForwardConnectionArguments & KindFilter, { loaders }: Context) {
