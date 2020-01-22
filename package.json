@@ -44,7 +44,7 @@
     "cgi": "^0.3.1",
     "chardet": "^0.8.0",
     "compression": "^1.7.4",
-    "dataloader": "^1.4.0",
+    "dataloader": "^2.0.0",
     "execa": "^4.0.0",
     "express": "^4.17.1",
     "express-graphql": "^0.9.0",

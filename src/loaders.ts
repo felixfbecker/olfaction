@@ -57,16 +57,20 @@ export interface PathPatternFilter {
 
 export interface Loaders {
     analysis: {
-        all: DataLoader<ForwardConnectionArguments, Connection<Analysis>>
+        all: DataLoader<ForwardConnectionArguments, Connection<Analysis>, string>
         byId: DataLoader<Analysis['id'], Analysis>
         byName: DataLoader<Analysis['name'], Analysis>
     }
     codeSmell: {
         /** Loads a code smell by ID. */
         byId: DataLoader<CodeSmell['id'], CodeSmell>
-        byOrdinal: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>
+        byOrdinal: DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell, string>
         /** Loads the entire life span of a given lifespan ID. */
-        forLifespan: DataLoader<CodeSmellLifespanSpec & ForwardConnectionArguments, Connection<CodeSmell>>
+        forLifespan: DataLoader<
+            CodeSmellLifespanSpec & ForwardConnectionArguments,
+            Connection<CodeSmell>,
+            string
+        >
         many: DataLoader<
             Partial<RepoSpec> &
                 Partial<CommitSpec> &
@@ -75,7 +79,8 @@ export interface Loaders {
                 KindFilter &
                 PathPatternFilter &
                 ForwardConnectionArguments,
-            Connection<CodeSmell>
+            Connection<CodeSmell>,
+            string
         >
     }
     codeSmellLifespan: {
@@ -84,32 +89,38 @@ export interface Loaders {
         /** Loads the code smell lifespans for a given repository, analysis and/or kind. */
         many: DataLoader<
             Partial<RepoSpec> & Partial<AnalysisSpec> & KindFilter & ForwardConnectionArguments,
-            Connection<CodeSmellLifespan>
+            Connection<CodeSmellLifespan>,
+            string
         >
     }
 
     repository: {
-        forAnalysis: DataLoader<AnalysisSpec & ForwardConnectionArguments, Connection<RepoSpec>>
+        forAnalysis: DataLoader<AnalysisSpec & ForwardConnectionArguments, Connection<RepoSpec>, string>
     }
 
     commit: {
-        byOid: DataLoader<RepoSpec & CommitSpec, Commit>
+        byOid: DataLoader<RepoSpec & CommitSpec, Commit, string>
 
         /** Loads the existing commit OIDs in a repository */
         forRepository: DataLoader<
             RepoSpec & ForwardConnectionArguments & git.GitLogFilters,
-            Connection<Commit>
+            Connection<Commit>,
+            string
         >
 
         /** Loads the commits (and their repos) that were analyzed in an analysis */
-        forAnalysis: DataLoader<AnalysisSpec & ForwardConnectionArguments, Connection<RepoSpec & CommitSpec>>
+        forAnalysis: DataLoader<
+            AnalysisSpec & ForwardConnectionArguments,
+            Connection<RepoSpec & CommitSpec>,
+            string
+        >
     }
 
-    files: DataLoader<RepoSpec & CommitSpec & DirectoryFilter, File[]>
+    files: DataLoader<RepoSpec & CommitSpec & DirectoryFilter, File[], string>
     combinedFileDifference: {
-        forCommit: DataLoader<RepoSpec & CommitSpec, CombinedFileDifference[]>
+        forCommit: DataLoader<RepoSpec & CommitSpec, CombinedFileDifference[], string>
     }
-    fileContent: DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>
+    fileContent: DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer, string>
 }
 
 const repoAtCommitCacheKeyFn = ({ repository, commit }: RepoSpec & CommitSpec): string =>
@@ -156,7 +167,7 @@ const connectionFromOverfetchedResult = <T extends object>(
  * @returns The results grouped by repository.
  */
 async function mapCommitRepoSpecsGroupedByRepo<R>(
-    specs: (CommitSpec & RepoSpec)[],
+    specs: readonly (CommitSpec & RepoSpec)[],
     mapper: (value: RepoSpec & { commits: IterableX<CommitSpec> }) => Promise<R>
 ): Promise<ReadonlyMap<RepoSpec['repository'], R | Error>> {
     const byRepo = IterableX.from(specs).groupBy(spec => spec.repository)
@@ -195,7 +206,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                 })
             }),
 
-            byOrdinal: new DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell>(
+            byOrdinal: new DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell, string>(
                 async specs => {
                     const input = JSON.stringify(
                         specs.map(({ lifespan, ordinal }, index) => ({ index, lifespan, ordinal }))
@@ -322,10 +333,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                 }
             ),
 
-            forLifespan: new DataLoader<
-                CodeSmellLifespanSpec & ForwardConnectionArguments,
-                Connection<CodeSmell>
-            >(
+            forLifespan: new DataLoader(
                 async specs => {
                     const input = JSON.stringify(
                         specs.map(({ lifespan, first, after }, index) => {
@@ -527,7 +535,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
         ),
 
         combinedFileDifference: {
-            forCommit: new DataLoader<RepoSpec & CommitSpec, CombinedFileDifference[]>(
+            forCommit: new DataLoader<RepoSpec & CommitSpec, CombinedFileDifference[], string>(
                 async specs => {
                     const commitsByRepo = await mapCommitRepoSpecsGroupedByRepo(
                         specs,
@@ -556,17 +564,14 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
             ),
         },
 
-        fileContent: new DataLoader<RepoSpec & CommitSpec & FileSpec, Buffer>(
+        fileContent: new DataLoader(
             specs =>
                 Promise.all(
                     specs.map(({ repository, commit, file }) =>
                         git.getFileContent({ repository, commit, repoRoot, file }).catch(err => asError(err))
                     )
                 ),
-            {
-                cacheKeyFn: (spec: RepoSpec & CommitSpec & FileSpec) =>
-                    repoAtCommitCacheKeyFn(spec) + fileKeyFn(spec),
-            }
+            { cacheKeyFn: spec => repoAtCommitCacheKeyFn(spec) + fileKeyFn(spec) }
         ),
 
         repository: {
@@ -604,12 +609,13 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         }
                         return connectionFromOverfetchedResult(repositories, spec, cursorKey)
                     })
-                })
+                }),
+                { cacheKeyFn: spec => spec.analysis + connectionArgsKeyFn(spec) }
             ),
         },
 
         commit: {
-            byOid: new DataLoader<RepoSpec & CommitSpec, Commit>(
+            byOid: new DataLoader(
                 async specs => {
                     const commitsByRepo = await mapCommitRepoSpecsGroupedByRepo(
                         specs,
@@ -730,7 +736,8 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         }
                         return connectionFromOverfetchedResult(repoCommitSpecs, spec, cursorKey)
                     })
-                })
+                }),
+                { cacheKeyFn: spec => spec.analysis + connectionArgsKeyFn(spec) }
             ),
         },
     }

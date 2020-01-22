@@ -1059,9 +1059,9 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         subject(): string {
             return this.commit.message.split('\n', 1)[0]
         }
-        async parents(args: {}, { loaders }: Context) {
-            const parentCommits = await loaders.commit.byOid.loadMany(
-                this.commit.parents.map(parentOid => ({ ...this.spec, commit: parentOid }))
+        async parents(args: {}, { loaders }: Context): Promise<CommitResolver[]> {
+            const parentCommits = await pMap(this.commit.parents, parentOid =>
+                loaders.commit.byOid.load({ ...this.spec, commit: parentOid })
             )
             return parentCommits.map(parent => new CommitResolver(this.spec, parent))
         }
