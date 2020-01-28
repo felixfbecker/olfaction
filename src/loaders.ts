@@ -576,10 +576,11 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
 
         fileContent: new DataLoader(
             specs =>
-                Promise.all(
-                    specs.map(({ repository, commit, file }) =>
-                        git.getFileContent({ repository, commit, repoRoot, file }).catch(err => asError(err))
-                    )
+                mapPromise(
+                    specs,
+                    ({ repository, commit, file }) =>
+                        git.getFileContent({ repository, commit, repoRoot, file }).catch(err => asError(err)),
+                    { concurrency: 100 }
                 ),
             { cacheKeyFn: spec => repoAtCommitCacheKeyFn(spec) + fileKeyFn(spec) }
         ),
@@ -655,42 +656,39 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
 
             forRepository: new DataLoader(
                 logDuration('loaders.commit.forRepository', async specs =>
-                    Promise.all(
-                        specs.map(
-                            async ({ repository, first, after, startRevision, path, ...filterOptions }) => {
-                                try {
-                                    const afterOffset = (after && cursorToOffset(after)) || 0
-                                    assert(
-                                        !afterOffset || (!isNaN(afterOffset) && afterOffset >= 0),
-                                        'Invalid cursor'
+                    mapPromise(
+                        specs,
+                        async ({ repository, first, after, startRevision, path, ...filterOptions }) => {
+                            try {
+                                const afterOffset = (after && cursorToOffset(after)) || 0
+                                assert(
+                                    !afterOffset || (!isNaN(afterOffset) && afterOffset >= 0),
+                                    'Invalid cursor'
+                                )
+                                const commits = await git
+                                    .log({
+                                        ...filterOptions,
+                                        repoRoot,
+                                        repository,
+                                        startRevision,
+                                        skip: afterOffset,
+                                        maxCount: typeof first === 'number' ? first + 1 : undefined,
+                                    })
+                                    .tap((commit: Commit) =>
+                                        loaders.commit.byOid.prime({ repository, commit: commit.oid }, commit)
                                     )
-                                    const commits = await git
-                                        .log({
-                                            ...filterOptions,
-                                            repoRoot,
-                                            repository,
-                                            startRevision,
-                                            skip: afterOffset,
-                                            maxCount: typeof first === 'number' ? first + 1 : undefined,
-                                        })
-                                        .tap((commit: Commit) =>
-                                            loaders.commit.byOid.prime(
-                                                { repository, commit: commit.oid },
-                                                commit
-                                            )
-                                        )
-                                        .toArray()
+                                    .toArray()
 
-                                    return connectionFromOverfetchedResult<Commit>(
-                                        commits,
-                                        { first, after },
-                                        (node, index) => offsetToCursor(afterOffset + index)
-                                    )
-                                } catch (err) {
-                                    return asError(err)
-                                }
+                                return connectionFromOverfetchedResult<Commit>(
+                                    commits,
+                                    { first, after },
+                                    (node, index) => offsetToCursor(afterOffset + index)
+                                )
+                            } catch (err) {
+                                return asError(err)
                             }
-                        )
+                        },
+                        { concurrency: 100 }
                     )
                 ),
                 {
