@@ -1,7 +1,7 @@
 import 'source-map-support/register'
 
 import express, { Request, Response, NextFunction } from 'express'
-import { Client, Pool, PoolClient, ClientBase } from 'pg'
+import { Pool } from 'pg'
 import * as path from 'path'
 import { createGraphQLHandler, createGraphQLHTTPHandler } from './routes/graphql'
 import morgan from 'morgan'
