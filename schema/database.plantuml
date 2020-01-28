@@ -23,13 +23,13 @@ entity code_smells {
   message TEXT
 }
 
-code_smells }|--|| code_smell_lifespans
+code_smell_lifespans ||-|{ code_smells
 
 entity analyses {
   *id UUID <<PK>>
   *name TEXT
 }
-code_smells }o--|| analyses
+analyses ||--o{ code_smell_lifespans
 
 entity analysed_commits {
   *analysis UUID
@@ -37,7 +37,7 @@ entity analysed_commits {
   *commit TEXT
 }
 
-analyses ||--o{ analysed_commits
+analyses ||-o{ analysed_commits
 
 ' entity file_links {
 '   *from_path TEXT

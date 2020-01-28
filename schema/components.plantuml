@@ -3,7 +3,7 @@ skinparam monochrome true
 skinparam shadowing false
 skinparam backgroundColor transparent
 skinparam classBackgroundColor transparent
-
+skinparam style strictuml
 
 database "Git Repositories" as GitRepos
 database "PostgreSQL DB" as Postgres
@@ -13,10 +13,11 @@ database "PostgreSQL DB" as Postgres
 component "Application Container" {
   component Server
   HTTP -- Server
-  package "Routes" {
+  package "Route Handlers" {
     component "Git Upload" as GitUpload
     component "REST" as REST
     component "GraphQL" as GraphQL
+    GraphQL <.left. REST
   }
   component Loaders
   component "Git DAL" as GitDAL
@@ -25,7 +26,6 @@ component "Application Container" {
   GitUpload .right.> GitRepos
   Server .down.> GraphQL
   Server .down.> REST
-  REST .down.> Loaders
   GraphQL .down.> Loaders
   Loaders .down..> Postgres
   Loaders .down.> GitDAL
