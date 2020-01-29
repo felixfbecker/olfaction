@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     app.use(morgan('dev', { immediate: false }))
 
     if (basicAuthUsers) {
-        app.use(basicAuth({ users: basicAuthUsers }))
+        app.use(basicAuth({ users: basicAuthUsers, challenge: true, realm: 'olfaction' }))
     }
 
     app.use('/git', createRepoUploadRouter({ repoRoot }))
