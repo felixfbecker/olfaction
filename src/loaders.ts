@@ -26,17 +26,10 @@ import {
     logDuration,
     DBContext,
     CursorKey,
+    withDBConnection,
 } from './util'
 import assert from 'assert'
-import {
-    Connection,
-    Edge,
-    ConnectionArguments,
-    connectionFromArraySlice,
-    cursorToOffset,
-    getOffsetWithDefault,
-    offsetToCursor,
-} from 'graphql-relay'
+import { Connection, Edge, ConnectionArguments, cursorToOffset, offsetToCursor } from 'graphql-relay'
 import { IterableX } from 'ix/iterable'
 import {
     UnknownCodeSmellError,
@@ -241,65 +234,117 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
             ),
 
             many: new DataLoader(
-                logDuration('loaders.codeSmell.forCommit', async specs => {
-                    const input = JSON.stringify(
-                        specs.map(
-                            (
-                                { repository, commit, analysis, file, kind, pathPattern, first, after },
-                                index
-                            ) => {
-                                assert(!first || first >= 0, 'Parameter first must be positive')
-                                const cursor = (after && parseCursor<CodeSmell>(after, ['id'])) || undefined
-                                return {
-                                    index,
-                                    repository: repository || null,
-                                    commit: commit || null,
-                                    fileQuery: file ? [{ file }] : null,
-                                    pathPattern: pathPattern || null,
-                                    kind: kind || null,
-                                    analysis: analysis || null,
-                                    first,
-                                    after: cursor?.value,
-                                }
+                logDuration('loaders.codeSmell.many', async specs => {
+                    const queries = IterableX.from(specs)
+                        .map(({ repository, commit, analysis, file, kind, pathPattern, first, after }) => {
+                            assert(!first || first >= 0, 'Parameter first must be positive')
+                            const cursor = (after && parseCursor<CodeSmell>(after, ['id'])) || undefined
+                            return {
+                                repository: repository || undefined,
+                                commit: commit || undefined,
+                                fileQuery: file ? [{ file }] : undefined,
+                                pathPattern: pathPattern || undefined,
+                                kind: kind || undefined,
+                                analysis: analysis || undefined,
+                                first,
+                                after: cursor?.value,
                             }
+                        })
+                        // Group by query shape, defined by which filters are passed
+                        .groupBy(
+                            ({ first, after, analysis, pathPattern, kind, fileQuery, commit, repository }) =>
+                                `${!!first}${!!after}${!!analysis}${!!pathPattern}${!!kind}${!!fileQuery}${!!commit}${!!repository}`
                         )
+                        // Build query
+                        .map(specGroup => {
+                            const specArr = specGroup.toArray()
+                            const firstSpec = specArr[0]
+                            const query = sql`
+                                with input as materialized (
+                                    select
+                                        ordinality,
+                                        nullif(spec->>'commit', '')::text as "commit",
+                                        nullif(spec->>'repository', '')::text as "repository",
+                                        nullif(spec->>'analysis', '')::uuid as "analysis",
+                                        nullif(spec->'fileQuery', 'null')::jsonb as "file",
+                                        nullif(spec->>'pathPattern', '')::text as "path",
+                                        nullif(spec->>'kind', '')::text as "kind",
+                                        nullif(spec->'first', 'null')::int as "first",
+                                        nullif(spec->>'after', '')::uuid as "after"
+                                    from rows from (unnest(${specArr}::jsonb[])) with ordinality as spec
+                                )
+                                select json_agg(c order by id) as "codeSmells"
+                                from input
+                                left join lateral (
+                                    select "id", "message", "ordinal", "lifespan", "commit", "locations",
+                                        jsonb_build_object('id', lifespan, 'repository', repository, 'kind', kind, 'analysis', analysis) as "lifespanObject"
+                                    from code_smells_for_commit
+                                    where true
+                            `
+                            if (firstSpec.repository) {
+                                query.append(
+                                    sql` and code_smells_for_commit."repository" = input."repository" `
+                                )
+                            }
+                            if (firstSpec.analysis) {
+                                query.append(sql` and code_smells_for_commit."analysis" = input."analysis" `)
+                            }
+                            if (firstSpec.kind) {
+                                query.append(sql` and code_smells_for_commit."kind" = input."kind" `)
+                            }
+                            if (firstSpec.commit) {
+                                query.append(sql` and code_smells_for_commit."commit" = input."commit" `)
+                            }
+                            if (firstSpec.fileQuery) {
+                                query.append(
+                                    sql` and code_smells_for_commit."locations" @> input."fileQuery" `
+                                )
+                            }
+                            if (firstSpec.pathPattern) {
+                                query.append(sql`
+                                    and exists (
+                                        select "file"
+                                        from jsonb_to_recordset(code_smells_for_commit.locations) as locations("file" text)
+                                        where "file" ~* input."pathPattern"
+                                    )
+                                `)
+                            }
+                            if (firstSpec.after) {
+                                query.append(sql` and code_smells_for_commit."id" >= input."after" `)
+                            }
+                            if (typeof firstSpec.first === 'number') {
+                                query.append(sql` order by code_smells_for_commit.id asc `)
+                                // query one more to know whether there is a next page
+                                query.append(sql` limit input.first + 1 `)
+                            }
+                            query.append(sql`
+                                ) c on true
+                                group by input."ordinality"
+                                order by input."ordinality"
+                            `)
+                            return query
+                        })
+
+                    const results = await mapPromise(
+                        queries,
+                        async query => {
+                            const results = await withDBConnection(dbPool, dbClient =>
+                                dbClient.query<{
+                                    codeSmells:
+                                        | [null]
+                                        | (CodeSmell & {
+                                              lifespanObject: CodeSmellLifespan
+                                          })[]
+                                }>(query)
+                            )
+                            return results.rows
+                        },
+                        { concurrency: 100 }
                     )
-                    const result = await dbPool.query<{
-                        codeSmells: [null] | (CodeSmell & { lifespanObject: CodeSmellLifespan })[]
-                    }>(sql`
-                        select input."index", array_agg(to_jsonb(c)) as "codeSmells"
-                        from jsonb_to_recordset(${input}::jsonb) as input(
-                            "index" int,
-                            "commit" text,
-                            "repository" text,
-                            "analysis" uuid,
-                            "fileQuery" jsonb,
-                            "pathPattern" text,
-                            "kind" text,
-                            "first" int,
-                            "after" uuid
-                        )
-                        left join lateral (
-                            select code_smells.*, to_jsonb(code_smell_lifespans) as "lifespanObject"
-                            from code_smells
-                            inner join code_smell_lifespans on code_smells.lifespan = code_smell_lifespans.id
-                            where (input.repository is null or code_smell_lifespans.repository = input.repository)
-                            and (input.analysis is null or code_smell_lifespans.analysis = input.analysis)
-                            and (input.commit is null or code_smells.commit = input.commit)
-                            and (input."fileQuery" is null or code_smells.locations @> input."fileQuery")
-                            and (input."pathPattern" is null or exists (select "file" from jsonb_to_recordset(code_smells.locations) as locations("file" text) where "file" ~* input."pathPattern"))
-                            and (input.kind is null or code_smell_lifespans.kind = input.kind)
-                            -- pagination:
-                            and (input.after is null or code_smells.id >= input.after) -- include one before to know whether there is a previous page
-                            order by id asc
-                            limit input.first + 1 -- query one more to know whether there is a next page
-                        ) c on true
-                        group by input."index"
-                        order by input."index"
-                    `)
-                    assert.strictEqual(result.rows.length, specs.length, 'Expected length to be the same')
-                    return result.rows.map(
-                        ({ codeSmells }, i): Connection<CodeSmell> => {
+
+                    return IterableX.from(results)
+                        .flatMap(rows => rows)
+                        .map(({ codeSmells }, i) => {
                             const spec = specs[i]
                             if (isNullArray(codeSmells)) {
                                 codeSmells = []
@@ -333,9 +378,9 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                                     codeSmell.lifespanObject
                                 )
                             }
-                            return connectionFromOverfetchedResult(codeSmells, spec, ['id'])
-                        }
-                    )
+                            return connectionFromOverfetchedResult<CodeSmell>(codeSmells, spec, ['id'])
+                        })
+                        .toArray()
                 }),
                 {
                     cacheKeyFn: ({ repository, commit, analysis, file, kind, first, after }) =>
@@ -397,7 +442,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                     const result = await dbPool.query<{
                         analyses: [null] | Analysis[]
                     }>(sql`
-                        select array_agg(to_jsonb(a)) as "analyses"
+                        select json_agg(a) as "analyses"
                         from jsonb_to_recordset(${input}::jsonb) as input("index" int, "first" int, "after" uuid)
                         left join lateral (
                             select analyses.*
@@ -495,7 +540,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                     const result = await dbPool.query<{
                         lifespans: [null] | CodeSmellLifespan[]
                     }>(sql`
-                        select array_agg(to_jsonb(l)) as "lifespans"
+                        select json_agg(l) as "lifespans"
                         from jsonb_to_recordset(${input}::jsonb) as input("index" int, "repository" text, "analysis" uuid, "kind" text, "first" int, "after" uuid)
                         left join lateral (
                             select code_smell_lifespans.*
@@ -599,7 +644,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                     const result = await dbPool.query<{
                         repositories: [null] | RepoSpec[]
                     }>(sql`
-                        select array_agg(to_jsonb(l)) as "repositories"
+                        select json_agg(l) as "repositories"
                         from jsonb_to_recordset(${input}::jsonb) as input("index" int, "analysis" uuid, "first" int, "after" text)
                         left join lateral (
                             select distinct "repository"
@@ -729,7 +774,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                     const result = await dbPool.query<{
                         repoCommitSpecs: [null] | (RepoSpec & CommitSpec)[]
                     }>(sql`
-                        select array_agg(to_jsonb(c)) as "repoCommitSpecs"
+                        select json_agg(c) as "repoCommitSpecs"
                         from jsonb_to_recordset(${input}::jsonb) as input("index" int, "analysis" uuid, "first" int, "after" text)
                         left join lateral (
                             select "commit", "repository"
