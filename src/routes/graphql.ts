@@ -694,49 +694,54 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                         await checkRepositoryExists({ repository, repoRoot })
                         await checkCommitExists({ repository, commit, repoRoot })
                         const codeSmellResolvers = await withDBConnection(dbPool, db =>
-                            transaction(db, () =>
-                                pMap(codeSmells, async ({ kind, message, locations, lifespan, ordinal }) => {
-                                    // Normalization
-                                    message = message?.trim() || null
-                                    locations = locations || []
-                                    for (const location of locations) {
-                                        if (path.posix.isAbsolute(location.file)) {
-                                            throw new Error(
-                                                `File path must be relative to repository root: ${location.file}`
-                                            )
+                            transaction(db, async () => {
+                                await pMap(
+                                    codeSmells,
+                                    async ({ kind, message, locations, lifespan, ordinal }) => {
+                                        // Normalization
+                                        message = message?.trim() || null
+                                        locations = locations || []
+                                        for (const location of locations) {
+                                            if (path.posix.isAbsolute(location.file)) {
+                                                throw new Error(
+                                                    `File path must be relative to repository root: ${location.file}`
+                                                )
+                                            }
+                                            location.file = path.normalize(location.file)
                                         }
-                                        location.file = path.normalize(location.file)
-                                    }
-                                    locations = sortBy(locations, [
-                                        l => l.file,
-                                        l => l.range.start.line,
-                                        l => l.range.start.character,
-                                        l => l.range.end.line,
-                                        l => l.range.end.character,
-                                    ])
+                                        locations = sortBy(locations, [
+                                            l => l.file,
+                                            l => l.range.start.line,
+                                            l => l.range.start.character,
+                                            l => l.range.end.line,
+                                            l => l.range.end.character,
+                                        ])
 
-                                    const locationsJson = JSON.stringify(locations)
+                                        const locationsJson = JSON.stringify(locations)
 
-                                    // Get or create lifespan with ID passed from client
-                                    const lifespanResult = await db.query<{ id: UUID }>(sql`
-                                        insert into code_smell_lifespans (id, kind, repository)
-                                        values (${lifespan}, ${kind}, ${repository})
-                                        on conflict on constraint code_smell_lifespans_pkey do nothing
-                                        returning id
-                                    `)
-                                    const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
-                                    const result = await db.query<CodeSmell>(sql`
-                                        insert into code_smells
-                                                    ("commit", "message", locations, lifespan, ordinal)
-                                        values      (${commit}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
-                                        returning   id, "commit", "message", locations, lifespan, ordinal
-                                    `)
-                                    const codeSmell = result.rows[0]
-                                    loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
-                                    loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
-                                    return new CodeSmellResolver(codeSmell)
-                                })
-                            )
+                                        // Get or create lifespan with ID passed from client
+                                        const lifespanResult = await db.query<{ id: UUID }>(sql`
+                                            insert into code_smell_lifespans (id, kind, repository)
+                                            values (${lifespan}, ${kind}, ${repository})
+                                            on conflict on constraint code_smell_lifespans_pkey do nothing
+                                            returning id
+                                        `)
+                                        const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
+                                        const result = await db.query<CodeSmell>(sql`
+                                            insert into code_smells
+                                                        ("commit", "message", locations, lifespan, ordinal)
+                                            values      (${commit}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
+                                            returning   id, "commit", "message", locations, lifespan, ordinal
+                                        `)
+                                        const codeSmell = result.rows[0]
+                                        loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
+                                        loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
+                                        return new CodeSmellResolver(codeSmell)
+                                    },
+                                    { concurrency: 100 }
+                                )
+                                await db.query(sql`refresh materialized view "code_smells_for_commit"`)
+                            })
                         )
                         return { codeSmells: codeSmellResolvers }
                     },

@@ -76,6 +76,26 @@ CREATE TABLE public.code_smells (
 
 
 --
+-- Name: code_smells_for_commit; Type: MATERIALIZED VIEW; Schema: public; Owner: -
+--
+
+CREATE MATERIALIZED VIEW public.code_smells_for_commit AS
+ SELECT c.id,
+    c.commit,
+    c.locations,
+    c.message,
+    c.ordinal,
+    c.lifespan,
+    l.repository,
+    l.kind,
+    l.analysis
+   FROM (public.code_smells c
+     JOIN public.code_smell_lifespans l ON ((c.lifespan = l.id)))
+  ORDER BY c.id
+  WITH NO DATA;
+
+
+--
 -- Name: analyzed_commits analysed_revisions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -156,6 +176,41 @@ CREATE INDEX code_smell_lifespans_repository_idx ON public.code_smell_lifespans 
 --
 
 CREATE INDEX code_smells_commit_idx ON public.code_smells USING btree (commit);
+
+
+--
+-- Name: code_smells_for_commit_analysis_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_smells_for_commit_analysis_idx ON public.code_smells_for_commit USING btree (analysis);
+
+
+--
+-- Name: code_smells_for_commit_kind_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_smells_for_commit_kind_idx ON public.code_smells_for_commit USING btree (kind);
+
+
+--
+-- Name: code_smells_for_commit_lifespan_ordinal_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_smells_for_commit_lifespan_ordinal_idx ON public.code_smells_for_commit USING btree (lifespan, ordinal);
+
+
+--
+-- Name: code_smells_for_commit_locations_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_smells_for_commit_locations_idx ON public.code_smells_for_commit USING gin (locations);
+
+
+--
+-- Name: code_smells_for_commit_repository_commit_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_smells_for_commit_repository_commit_idx ON public.code_smells_for_commit USING btree (repository, commit);
 
 
 --
