@@ -43,7 +43,7 @@ export const createRepoUploadRouter = ({ repoRoot }: RepoRootSpec): Router => {
     }
 
     router.all<{ repository: string }>(
-        '/:repository.git/*',
+        '/repositories/:repository.git/*',
         wrap(async (req, res, next) => {
             const { repository } = req.params
             git.validateRepositoryName({ repository })
@@ -53,7 +53,7 @@ export const createRepoUploadRouter = ({ repoRoot }: RepoRootSpec): Router => {
     )
 
     router.post<{ repository: string }>(
-        '/:repository.bundle',
+        '/repositories/:repository.bundle',
         wrap(async (req, res) => {
             const { repository } = req.params
             git.validateRepositoryName({ repository })

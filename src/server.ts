@@ -31,13 +31,12 @@ async function main(): Promise<void> {
         app.use(basicAuth({ users: basicAuthUsers, challenge: true, realm: 'olfaction' }))
     }
 
-    app.use('/git', createRepoUploadRouter({ repoRoot }))
-
     const graphQLHandler = createGraphQLHandler({ dbPool, repoRoot })
-
     app.use('/graphql', createGraphQLHTTPHandler({ ...graphQLHandler, dbPool, repoRoot }))
 
-    app.use('/rest', createRestRouter({ repoRoot, dbPool, graphQLHandler }))
+    app.use(createRepoUploadRouter({ repoRoot }))
+
+    app.use(createRestRouter({ repoRoot, dbPool, graphQLHandler }))
 
     app.use((err: any, req: Request, res: Response, next: NextFunction) => {
         console.error(err)
