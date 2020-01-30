@@ -26,6 +26,7 @@ export const createRepoUploadRouter = ({ repoRoot }: RepoRootSpec): Router => {
     }
 
     const handleGitReq = cgi('git', {
+        mountPoint: '/repositories',
         args: ['http-backend'],
         env: gitCGIEnv,
         stderr: process.stderr,
