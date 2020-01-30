@@ -662,11 +662,11 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                         },
                         commit: {
                             description: 'The commit to add code smells for.',
-                            type: GraphQLNonNull(GraphQLString),
+                            type: GraphQLNonNull(GitObjectIDType),
                         },
                         analysis: {
-                            description: 'The analysis the code smells should be added to.',
-                            type: GraphQLNonNull(GraphQLID),
+                            description: 'The name of the analysis the code smells should be added to.',
+                            type: GraphQLNonNull(GraphQLString),
                         },
                         codeSmells: {
                             description: 'The code smells to add.',
@@ -697,7 +697,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                             transaction(db, async () => {
                                 await pMap(
                                     codeSmells,
-                                    async ({ kind, message, locations, lifespan, ordinal }) => {
+                                    async ({ kind, message, locations, lifespan, ordinal, analysis }) => {
                                         // Normalization
                                         message = message?.trim() || null
                                         locations = locations || []
@@ -719,12 +719,25 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
 
                                         const locationsJson = JSON.stringify(locations)
 
+                                        const analysisResult = await db.query<{ id: UUID }>(sql`
+                                            select id from analyses where "name" = ${analysis}
+                                        `)
+                                        if (analysisResult.rows.length === 0) {
+                                            throw new UnknownAnalysisError({ name: analysis })
+                                        }
+                                        const analysisId = analysisResult.rows[0].id
+
                                         // Get or create lifespan with ID passed from client
                                         const lifespanResult = await db.query<{ id: UUID }>(sql`
-                                            insert into code_smell_lifespans (id, kind, repository)
-                                            values (${lifespan}, ${kind}, ${repository})
+                                            insert into code_smell_lifespans (id, kind, repository, analysis)
+                                            values (${lifespan}, ${kind}, ${repository}, ${analysisId})
                                             on conflict on constraint code_smell_lifespans_pkey do nothing
                                             returning id
+                                        `)
+                                        await db.query<{}>(sql`
+                                            insert into analyzed_commits (analysis, repository, "commit")
+                                            values (${analysisId}, ${repository}, ${commit})
+                                            on conflict on constraint analysed_revisions_pkey do nothing
                                         `)
                                         const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
                                         const result = await db.query<CodeSmell>(sql`
