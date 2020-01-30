@@ -846,7 +846,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             args: GraphQLArgs<ForwardConnectionArguments & KindFilter>,
             { loaders }: Context
         ) {
-            const lifespans = await loaders.codeSmellLifespan.many.load(args)
+            const lifespans = await loaders.codeSmellLifespan.many.load({
+                ...args,
+                analysis: this.analysis.id,
+            })
             return mapConnectionNodes(lifespans, lifespan => new CodeSmellLifespanResolver(lifespan))
         }
         async codeSmells(

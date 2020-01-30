@@ -85,8 +85,6 @@ export interface CodeSmell {
 
 export interface CodeSmellInput {
     lifespan: UUID
-    /** Analysis name */
-    analysis: string
     ordinal: number
     kind: string
     message: string | null
