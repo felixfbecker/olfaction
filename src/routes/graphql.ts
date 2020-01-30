@@ -683,10 +683,14 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                         {
                             repository,
                             commit,
+                            analysis,
                             codeSmells,
                         }: {
                             repository: string
                             commit: string
+
+                            /** Analysis name */
+                            analysis: string
                             codeSmells: CodeSmellInput[]
                         },
                         { loaders }: Context
@@ -697,7 +701,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                             transaction(db, async () => {
                                 await pMap(
                                     codeSmells,
-                                    async ({ kind, message, locations, lifespan, ordinal, analysis }) => {
+                                    async ({ kind, message, locations, lifespan, ordinal }) => {
                                         // Normalization
                                         message = message?.trim() || null
                                         locations = locations || []
