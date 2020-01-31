@@ -522,50 +522,95 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
             ),
             many: new DataLoader(
                 async specs => {
-                    const input = JSON.stringify(
-                        specs.map(({ repository, analysis, kind, first, after }, index) => {
+                    const queries = IterableX.from(specs)
+                        .map(({ repository, analysis, kind, first, after }) => {
                             assert(!first || first >= 0, 'Parameter first must be positive')
                             const cursor =
                                 (after && parseCursor<CodeSmellLifespan>(after, ['id'])) || undefined
                             return {
-                                index,
-                                repository: repository || null,
-                                analysis: analysis || null,
-                                kind: kind || null,
+                                repository: repository || undefined,
+                                analysis: analysis || undefined,
+                                kind: kind || undefined,
                                 first,
-                                after: cursor?.value,
+                                after: cursor?.value || undefined,
                             }
                         })
+                        // Group by query shape, defined by which filters are passed
+                        .groupBy(
+                            ({ first, after, analysis, kind, repository }) =>
+                                `${!!first}${!!after}${!!analysis}${!!kind}${!!repository}`
+                        )
+                        // Build query
+                        .map(specGroup => {
+                            const specArr = specGroup.toArray()
+                            const firstSpec = specArr[0]
+                            const query = sql`
+                                with input as materialized (
+                                    select
+                                        ordinality,
+                                        nullif(spec->>'repository', '')::text as "repository",
+                                        nullif(spec->>'analysis', '')::uuid as "analysis",
+                                        nullif(spec->>'kind', '')::text as "kind",
+                                        nullif(spec->'first', 'null')::int as "first",
+                                        nullif(spec->>'after', '')::uuid as "after"
+                                    from rows from (unnest(${specArr}::jsonb[])) with ordinality as spec
+                                )
+                                select json_agg(l order by id) as "lifespans"
+                                from input
+                                left join lateral (
+                                    select code_smell_lifespans.*
+                                    from code_smell_lifespans
+                                    where true
+                            `
+                            if (firstSpec.repository) {
+                                query.append(sql` and code_smell_lifespans.repository = input.repository `)
+                            }
+                            if (firstSpec.analysis) {
+                                query.append(sql` and code_smell_lifespans.analysis = input.analysis `)
+                            }
+                            if (firstSpec.kind) {
+                                query.append(sql` and code_smell_lifespans.kind = input.kind `)
+                            }
+                            if (firstSpec.after) {
+                                // include one before to know whether there is a previous page
+                                query.append(sql` and code_smell_lifespans.id >= input.after `)
+                            }
+                            if (typeof firstSpec.first === 'number') {
+                                query.append(sql` order by code_smell_lifespans.id asc `)
+                                // query one more to know whether there is a next page
+                                query.append(sql` limit input.first + 1 `)
+                            }
+                            query.append(sql`
+                                ) l on true
+                                group by input."ordinality"
+                                order by input."ordinality"
+                            `)
+                            return query
+                        })
+
+                    const results = await mapPromise(
+                        queries,
+                        async query => {
+                            const result = await dbPool.query<{
+                                lifespans: [null] | CodeSmellLifespan[]
+                            }>(query)
+                            return result.rows
+                        },
+                        { concurrency: 100 }
                     )
-                    const result = await dbPool.query<{
-                        lifespans: [null] | CodeSmellLifespan[]
-                    }>(sql`
-                        select json_agg(l) as "lifespans"
-                        from jsonb_to_recordset(${input}::jsonb) as input("index" int, "repository" text, "analysis" uuid, "kind" text, "first" int, "after" uuid)
-                        left join lateral (
-                            select code_smell_lifespans.*
-                            from code_smell_lifespans
-                            where (input.repository is null or code_smell_lifespans.repository = input.repository)
-                            and (input.analysis is null or code_smell_lifespans.analysis = input.analysis)
-                            and (input.kind is null or code_smell_lifespans.kind = input.kind)
-                            -- pagination:
-                            and (input.after is null or code_smell_lifespans.id >= input.after) -- include one before to know whether there is a previous page
-                            order by id asc
-                            limit input.first + 1 -- query one more to know whether there is a next page
-                        ) l on true
-                        group by input."index"
-                        order by input."index"
-                    `)
-                    return result.rows.map(({ lifespans }, i) => {
-                        const spec = specs[i]
-                        if (isNullArray(lifespans)) {
-                            lifespans = []
-                        }
-                        for (const lifespan of lifespans) {
-                            loaders.codeSmellLifespan.oneById.prime(lifespan.id, lifespan)
-                        }
-                        return connectionFromOverfetchedResult(lifespans, spec, ['id'])
-                    })
+                    return IterableX.from(results)
+                        .flatMap(rows => rows)
+                        .map(({ lifespans }, i) => {
+                            const spec = specs[i]
+                            if (isNullArray(lifespans)) {
+                                lifespans = []
+                            }
+                            for (const lifespan of lifespans) {
+                                loaders.codeSmellLifespan.oneById.prime(lifespan.id, lifespan)
+                            }
+                            return connectionFromOverfetchedResult(lifespans, spec, ['id'])
+                        })
+                        .toArray()
                 },
                 {
                     cacheKeyFn: ({ repository, analysis, kind, first, after }) =>
