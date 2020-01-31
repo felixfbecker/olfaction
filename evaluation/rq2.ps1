@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 # 2. How scattered are code smells in each commit over time?
 
 [cmdletbinding()]
@@ -58,11 +60,13 @@ $body = (@{
     }
 } | ConvertTo-Json)
 
-$result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json' -Credential $Credential -AllowUnencryptedAuthentication
+$measure = Measure-Command {
+    $result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json' -Credential $Credential -AllowUnencryptedAuthentication
+}
+Write-Verbose "Got result after $measure"
 if ($result.PSObject.Properties['errors'] -and $result.errors) {
     throw ($result.errors | ConvertTo-Json -Depth 100)
 }
-Write-Verbose "Got result"
 $result.data.analysis.analyzedRepositories.edges |
     ForEach-Object { $_.node.commits.edges } |
     ForEach-Object -Parallel {
