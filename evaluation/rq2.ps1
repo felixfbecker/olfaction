@@ -70,7 +70,7 @@ if ($result.PSObject.Properties['errors'] -and $result.errors) {
 $result.data.analysis.analyzedRepositories.edges |
     ForEach-Object { $_.node.commits.edges } |
     ForEach-Object -Parallel {
-        Import-Module $PSScriptRoot/directory_distance.psm1
+        Import-Module $using:PSScriptRoot/directory_distance.psm1
 
         $commit = $_.node
         Write-Verbose "Commit $($commit.oid)"
