@@ -11,17 +11,23 @@ import { AddressInfo } from 'net'
 import { createRestRouter } from './routes/rest'
 import compression from 'compression'
 import basicAuth from 'express-basic-auth'
+import { initTracerFromEnv } from 'jaeger-client'
+import { Tracer } from 'opentracing'
+import opentracingMiddleware from 'express-opentracing'
 
 const repoRoot = path.resolve(process.env.REPO_ROOT || path.resolve(process.cwd(), 'repos'))
 const port = (process.env.PORT && parseInt(process.env.PORT, 10)) || 4040
 const basicAuthUsers = process.env.BASIC_AUTH_USERS && JSON.parse(process.env.BASIC_AUTH_USERS)
 
 async function main(): Promise<void> {
+    const dbPool = new Pool()
+    const tracer: Tracer = initTracerFromEnv({ serviceName: 'olfaction-api' }, {})
+
     const app = express()
 
     app.set('etag', true)
 
-    const dbPool = new Pool()
+    app.use(opentracingMiddleware({ tracer }))
 
     app.use(compression())
 

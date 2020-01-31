@@ -53,7 +53,7 @@ import {
     CodeSmellLifespanSpec,
     GitObjectID,
 } from '../models'
-import { transaction, mapConnectionNodes, logDuration, DBContext, withDBConnection } from '../util'
+import { transaction, mapConnectionNodes, DBContext, withDBConnection } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
 import * as chardet from 'chardet'
 import {
@@ -69,6 +69,7 @@ import * as path from 'path'
 import { UnknownCodeSmellError, UnknownCodeSmellLifespanError, UnknownAnalysisError } from '../errors'
 import pMap from 'p-map'
 import rmfr from 'rmfr'
+import { trace, ParentSpanContext } from '../tracing'
 
 type GraphQLArg<T> = T extends undefined ? Exclude<T, undefined> | null : T
 /**
@@ -79,7 +80,7 @@ type GraphQLArgs<T> = {
     [K in keyof T]: GraphQLArg<T[K]>
 }
 
-interface Context {
+interface Context extends ParentSpanContext {
     loaders: Loaders
 }
 
@@ -1233,15 +1234,23 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     return { schema, rootValue: query }
 }
 
-export const createGraphQLContext = (options: DBContext & RepoRootSpec) => ({
+export const createGraphQLContext = (options: DBContext & RepoRootSpec & ParentSpanContext) => ({
     loaders: createLoaders(options),
 })
 
 export const createGraphQLHTTPHandler = (options: GraphQLHandler & DBContext & RepoRootSpec) =>
-    graphQLHTTPServer(() => ({
+    graphQLHTTPServer(req => ({
         ...options,
-        customExecuteFn: logDuration('graphql.execute', args => Promise.resolve(execute(args))),
-        context: createGraphQLContext(options),
+        customExecuteFn: args =>
+            trace(req.span, 'graphql.execute', span =>
+                execute({
+                    ...args,
+                    contextValue: {
+                        ...createGraphQLContext({ ...options, span }),
+                        span,
+                    },
+                })
+            ),
         graphiql: true,
         customFormatErrorFn: err => {
             console.error(err.originalError)

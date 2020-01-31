@@ -105,14 +105,3 @@ export function dataOrErrors<D>(result: ExecutionResult<D>): D {
     }
     return result.data!
 }
-
-// eslint-disable-next-line @typescript-eslint/ban-types
-export const logDuration = <P extends any[], R>(tag: string, fn: (...args: P) => Promise<R>) => async (
-    ...args: P
-): Promise<R> => {
-    const start = Date.now()
-    console.log(tag, 'starting', args?.[0]?.length)
-    const result = await fn(...args)
-    console.log(tag, `${((Date.now() - start) / 1000).toFixed(3)}s`)
-    return result
-}
