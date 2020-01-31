@@ -864,17 +864,24 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
-            const { edges, pageInfo } = await loaders.commit.forAnalysis.load({
+            const connection = await loaders.commit.forAnalysis.load({
                 ...args,
                 analysis: this.analysis.id,
             })
             return {
-                pageInfo,
+                get pageInfo() {
+                    return connection.pageInfo
+                },
                 edges: await pMap(
-                    edges,
-                    async ({ node, cursor }) => {
-                        const commit = await loaders.commit.byOid.load(node)
-                        return { node: new CommitResolver(node, commit), cursor }
+                    connection.edges,
+                    async edge => {
+                        const commit = await loaders.commit.byOid.load(edge.node)
+                        return {
+                            node: new CommitResolver(edge.node, commit),
+                            get cursor() {
+                                return edge.cursor
+                            },
+                        }
                     },
                     { concurrency: 100 }
                 ),
@@ -972,13 +979,20 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             args: ForwardConnectionArguments,
             { loaders }: Context
         ): Promise<Connection<CodeSmellResolver>> {
-            const { pageInfo, edges } = await loaders.codeSmell.forLifespan.load({
+            const connection = await loaders.codeSmell.forLifespan.load({
                 lifespan: this.lifespan.id,
                 ...args,
             })
             return {
-                pageInfo,
-                edges: edges.map(({ node, cursor }) => ({ cursor, node: new CodeSmellResolver(node) })),
+                get pageInfo() {
+                    return connection.pageInfo
+                },
+                edges: connection.edges.map(edge => ({
+                    node: new CodeSmellResolver(edge.node),
+                    get cursor() {
+                        return edge.cursor
+                    },
+                })),
             }
         }
 

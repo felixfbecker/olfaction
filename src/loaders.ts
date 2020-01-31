@@ -149,17 +149,24 @@ const connectionFromOverfetchedResult = <T extends object>(
     const makeCursor =
         typeof cursorStrategy === 'function' ? cursorStrategy : makeCursorFromKey(cursorStrategy)
     const edges: Edge<T>[] = IterableX.from(result)
-        .map((node, index) => ({ node, cursor: makeCursor(node, index) }))
+        .map((node, index) => ({
+            node,
+            get cursor() {
+                return makeCursor(node, index)
+            },
+        }))
         .skip(after ? 1 : 0)
         .take(first ?? Infinity)
         .toArray()
     return {
         edges,
-        pageInfo: {
-            startCursor: edges[0]?.cursor,
-            endCursor: last(edges)?.cursor,
-            hasPreviousPage: Boolean(after), // The presence of an "after" cursor MUST mean there is at least one item BEFORE this page
-            hasNextPage: last(result) !== last(edges)?.node,
+        get pageInfo() {
+            return {
+                startCursor: edges[0]?.cursor,
+                endCursor: last(edges)?.cursor,
+                hasPreviousPage: !!after, // The presence of an "after" cursor MUST mean there is at least one item BEFORE this page
+                hasNextPage: last(result) !== last(edges)?.node,
+            }
         },
     }
 }

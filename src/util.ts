@@ -85,8 +85,15 @@ export type NullFields<T> = { [K in keyof T]: null }
  * Map the nodes in a GraphQL Relay Connection.
  */
 export const mapConnectionNodes = <T, R>(connection: Connection<T>, fn: (node: T) => R): Connection<R> => ({
-    ...connection,
-    edges: connection.edges.map(edge => ({ ...edge, node: fn(edge.node) })),
+    get pageInfo() {
+        return connection.pageInfo
+    },
+    edges: connection.edges.map(edge => ({
+        node: fn(edge.node),
+        get cursor() {
+            return edge.cursor
+        },
+    })),
 })
 
 export function asError(value: unknown): Error {
