@@ -3,30 +3,36 @@
 
 [CmdletBinding()]
 param(
-    [Uri] $ServerUrl = [Uri]::new("http://localhost:4040")
+    [Parameter(Mandatory)]
+    [string] $Analysis,
+
+    [Uri] $ServerUrl = [Uri]::new("http://localhost:4040"),
+    [pscredential] $Credential
 )
 
 $body = (@{
     query = '
-        query {
-            repositories {
-                edges {
-                    node {
-                        # Get first and last commit date to calculate percentage of the total project age
-                        commits {
-                            edges {
-                                node {
-                                    author {
-                                        date
+        query($analysis: String!) {
+            analysis(name: $analysis) {
+                analyzedRepositories {
+                    edges {
+                        node {
+                            # Get first and last commit date to calculate percentage of the total project age
+                            commits {
+                                edges {
+                                    node {
+                                        author {
+                                            date
+                                        }
                                     }
                                 }
                             }
-                        }
-                        codeSmellLifespans {
-                            edges {
-                                node {
-                                    kind
-                                    duration
+                            codeSmellLifespans {
+                                edges {
+                                    node {
+                                        kind
+                                        duration
+                                    }
                                 }
                             }
                         }
@@ -35,15 +41,17 @@ $body = (@{
             }
         }
     '
-    variables = @{}
+    variables = @{
+        analysis = $Analysis
+    }
 } | ConvertTo-Json)
 Write-Verbose "Body: $body"
 
-$result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json'
+$result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json' -Credential $Credential -AllowUnencryptedAuthentication
 if ($result.PSObject.Properties['errors'] -and $result.errors) {
     throw ($result.errors | ConvertTo-Json -Depth 100)
 }
-$result.data.repositories.edges |
+$result.data.analysis.analyzedRepositories.edges |
     ForEach-Object {
         $repo = $_.node
         $headCommitDate = $repo.commits.edges[0].node.author.date
@@ -56,10 +64,10 @@ $result.data.repositories.edges |
                 Age = [System.Xml.XmlConvert]::ToTimeSpan($_.node.duration) / $projectAge
             }
         }
-    } |
-    Group-Object -Property Kind |
-    ForEach-Object {
-        $measure = $_.Group | Measure-Object -AllStats -Property Age
-        Add-Member -MemberType NoteProperty -Name Kind -Value $_.Name -InputObject $measure
-        $measure
     }
+    # Group-Object -Property Kind |
+    # ForEach-Object {
+    #     $measure = $_.Group | Measure-Object -AllStats -Property Age
+    #     Add-Member -MemberType NoteProperty -Name Kind -Value $_.Name -InputObject $measure
+    #     $measure
+    # }

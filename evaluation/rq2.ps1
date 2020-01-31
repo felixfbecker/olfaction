@@ -3,75 +3,43 @@
 [cmdletbinding()]
 param(
     [Uri] $ServerUrl = [Uri]::new("http://localhost:4040"),
-    $Result
+
+    [Parameter(Mandatory)]
+    $Analysis,
+
+    [pscredential] $Credential
 )
 
-function Measure-PairwiseDirectoryDistances {
-    [CmdletBinding()]
-    [outputtype([int])]
-    param([string[]]$Paths)
-
-    Write-Verbose "Measuring distances of $($Paths.Count) paths pairwise"
-    $stack = [System.Collections.Generic.Stack[string]]::new($Paths)
-    while ($stack.Count -gt 0) {
-        $a = $stack.Pop()
-        foreach ($b in $stack) {
-            Measure-DirectoryDistance $a $b
-        }
-    }
-}
-
-function Measure-DirectoryDistance {
-    [cmdletbinding()]
-    [outputtype([int])]
-    param([string]$a, [string]$b)
-
-    $distance = 0
-    # Walk up to common ancestor
-    while (-not $b.StartsWith($a)) {
-        $idx = $a.LastIndexOf('/')
-        if ($idx -eq -1) {
-            $idx = 0
-        }
-        $a = $a.Substring(0, $idx)
-        $distance++
-    }
-    # Walk down to B and count directory separators
-    for ($i = $a.Length; $i -lt $b.Length; $i++) {
-        if ($b[$i] -eq '/') {
-            $distance++
-        }
-    }
-    return $distance
-}
 
 $body = (@{
     query = '
-        {
-            repositories {
-                edges {
-                    node {
-                        commits {
-                            edges {
-                                node {
-                                    oid
-                                    # Get all files to determine breadth of software
-                                    files {
-                                        edges {
-                                            node {
-                                                path
+        query($analysis: String!) {
+            analysis(name: $analysis) {
+                analyzedRepositories {
+                    edges {
+                        node {
+                            commits {
+                                edges {
+                                    node {
+                                        oid
+                                        # Get all files to determine breadth of software
+                                        files {
+                                            edges {
+                                                node {
+                                                    path
+                                                }
                                             }
                                         }
-                                    }
-                                    codeSmells {
-                                        edges {
-                                            node {
-                                                lifespan {
-                                                    kind
-                                                }
-                                                locations {
-                                                    file {
-                                                        path
+                                        codeSmells {
+                                            edges {
+                                                node {
+                                                    lifespan {
+                                                        kind
+                                                    }
+                                                    locations {
+                                                        file {
+                                                            path
+                                                        }
                                                     }
                                                 }
                                             }
@@ -85,20 +53,22 @@ $body = (@{
             }
         }
     '
-    variables = @{ }
+    variables = @{
+        analysis = $Analysis
+    }
 } | ConvertTo-Json)
 
-if (-not $result) {
-    $result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json'
-}
-$global:result = $result
+$result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json' -Credential $Credential -AllowUnencryptedAuthentication
 if ($result.PSObject.Properties['errors'] -and $result.errors) {
     throw ($result.errors | ConvertTo-Json -Depth 100)
 }
 Write-Verbose "Got result"
-$result.data.repositories.edges.node.commits.edges.node |
-    ForEach-Object {
-        $commit = $_
+$result.data.analysis.analyzedRepositories.edges |
+    ForEach-Object { $_.node.commits.edges } |
+    ForEach-Object -Parallel {
+        Import-Module $PSScriptRoot/directory_distance.psm1
+
+        $commit = $_.node
         Write-Verbose "Commit $($commit.oid)"
         Write-Verbose "$($commit.files.edges.Count) files"
         # Calculate breadth of software at this commit
@@ -123,13 +93,13 @@ $result.data.repositories.edges.node.commits.edges.node |
                         }
                     }
             }
-    } |
-    Group-Object -Property Kind |
-    ForEach-Object {
-        $_.Group |
-            Measure-Object -AllStats -Poperty Scatter |
-            ForEach-Object {
-                Add-Member -MemberType NoteProperty -Name Kind -Value $_.Name -InputObject $_
-                $_
-            }
     }
+    # Group-Object -Property Kind |
+    # ForEach-Object {
+    #     $_.Group |
+    #         Measure-Object -AllStats -Poperty Scatter |
+    #         ForEach-Object {
+    #             Add-Member -MemberType NoteProperty -Name Kind -Value $_.Name -InputObject $_
+    #             $_
+    #         }
+    # }
