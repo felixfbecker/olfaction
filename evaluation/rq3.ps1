@@ -54,11 +54,13 @@ $body = (@{
     }
 } | ConvertTo-Json)
 
-$result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json' -Credential $Credential -AllowUnencryptedAuthentication
+$duration = Measure-Command {
+    $result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json' -Credential $Credential -AllowUnencryptedAuthentication
+}
+Write-Verbose "Got result after $duration"
 if ($result.PSObject.Properties['errors'] -and $result.errors) {
     throw ($result.errors | ConvertTo-Json -Depth 100)
 }
-Write-Verbose "Got result"
 $result.data.analysis.analyzedRepositories.edges |
     ForEach-Object { $_.node.commits.edges } |
     ForEach-Object {
