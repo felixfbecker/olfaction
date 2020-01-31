@@ -298,8 +298,8 @@ export const createLoaders = ({
                                             nullif(spec->>'commit', '')::text as "commit",
                                             nullif(spec->>'repository', '')::text as "repository",
                                             nullif(spec->>'analysis', '')::uuid as "analysis",
-                                            nullif(spec->'fileQuery', 'null')::jsonb as "file",
-                                            nullif(spec->>'pathPattern', '')::text as "path",
+                                            nullif(spec->'fileQuery', 'null')::jsonb as "fileQuery",
+                                            nullif(spec->>'pathPattern', '')::text as "pathPattern",
                                             nullif(spec->>'kind', '')::text as "kind",
                                             nullif(spec->'first', 'null')::int as "first",
                                             nullif(spec->>'after', '')::uuid as "after"
