@@ -70,6 +70,7 @@ import { UnknownCodeSmellError, UnknownCodeSmellLifespanError, UnknownAnalysisEr
 import pMap from 'p-map'
 import rmfr from 'rmfr'
 import { trace, ParentSpanContext } from '../tracing'
+import { ClientBase } from 'pg'
 
 type GraphQLArg<T> = T extends undefined ? Exclude<T, undefined> | null : T
 /**
@@ -89,6 +90,8 @@ export interface GraphQLHandler {
     schema: GraphQLSchema
 }
 export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootSpec): GraphQLHandler {
+    const refreshViews = (db: ClientBase) => db.query(sql`refresh materialized view "code_smells_for_commit"`)
+
     var encodingArg: GraphQLFieldConfigArgumentMap = {
         encoding: {
             type: GraphQLString,
@@ -758,7 +761,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                     },
                                     { concurrency: 100 }
                                 )
-                                await db.query(sql`refresh materialized view "code_smells_for_commit"`)
+                                await refreshViews(db)
                                 return codeSmellResolvers
                             })
                         )
@@ -770,13 +773,19 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     description: 'Delete an analysis and all its code smells. Repositories are not deleted.',
                     inputFields: { name: { type: GraphQLNonNull(GraphQLString) } },
                     outputFields: {},
-                    mutateAndGetPayload: async ({ name }: AnalysisName) => {
-                        const result = await dbPool.query(sql`delete from analyses where "name" = ${name}`)
-                        if (result.rowCount === 0) {
-                            throw new UnknownAnalysisError({ name })
-                        }
-                        return {}
-                    },
+                    mutateAndGetPayload: async ({ name }: AnalysisName) =>
+                        withDBConnection(dbPool, db =>
+                            transaction(db, async () => {
+                                const result = await db.query(
+                                    sql`delete from analyses where "name" = ${name}`
+                                )
+                                if (result.rowCount === 0) {
+                                    throw new UnknownAnalysisError({ name })
+                                }
+                                await refreshViews(db)
+                                return {}
+                            })
+                        ),
                 }),
                 deleteRepository: mutationWithClientMutationId({
                     name: 'DeleteRepository',
@@ -799,6 +808,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                     sql`delete from analyzed_commits where repository = ${repository}`
                                 )
                             })
+                            await refreshViews(db)
                             await rmfr(resolveRepoDir({ repoRoot, repository }))
                         })
                         return {}
@@ -810,12 +820,17 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     inputFields: { id: { type: GraphQLNonNull(GraphQLID) } },
                     outputFields: {},
                     mutateAndGetPayload: async ({ codeSmell }: CodeSmellSpec) => {
-                        const result = await dbPool.query(
-                            sql`delete from code_smells where id = ${codeSmell}`
-                        )
-                        if (result.rowCount === 0) {
-                            throw new UnknownCodeSmellError({ codeSmell })
-                        }
+                        await withDBConnection(dbPool, async db => {
+                            await transaction(db, async () => {
+                                const result = await dbPool.query(
+                                    sql`delete from code_smells where id = ${codeSmell}`
+                                )
+                                if (result.rowCount === 0) {
+                                    throw new UnknownCodeSmellError({ codeSmell })
+                                }
+                                await refreshViews(db)
+                            })
+                        })
                         return {}
                     },
                 }),
@@ -825,12 +840,17 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     inputFields: { id: { type: GraphQLNonNull(GraphQLID) } },
                     outputFields: {},
                     mutateAndGetPayload: async ({ lifespan }: CodeSmellLifespanSpec) => {
-                        const result = await dbPool.query(
-                            sql`delete from code_smell_lifespans where id = ${lifespan}`
-                        )
-                        if (result.rowCount === 0) {
-                            throw new UnknownCodeSmellLifespanError({ lifespan })
-                        }
+                        await withDBConnection(dbPool, async db => {
+                            await transaction(db, async () => {
+                                const result = await db.query(
+                                    sql`delete from code_smell_lifespans where id = ${lifespan}`
+                                )
+                                if (result.rowCount === 0) {
+                                    throw new UnknownCodeSmellLifespanError({ lifespan })
+                                }
+                                await refreshViews(db)
+                            })
+                        })
                         return {}
                     },
                 }),
