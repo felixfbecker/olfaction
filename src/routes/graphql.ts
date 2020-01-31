@@ -838,7 +838,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     })
 
     class AnalysisResolver {
-        constructor(private analysis: Analysis) { }
+        constructor(private analysis: Analysis) {}
         name() {
             return this.analysis.name
         }
@@ -856,7 +856,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             args: GraphQLArgs<ForwardConnectionArguments & KindFilter & PathPatternFilter>,
             { loaders }: Context
         ) {
-            const codeSmells = await loaders.codeSmell.many.load(args)
+            const codeSmells = await loaders.codeSmell.many.load({ ...args, analysis: this.analysis.id })
             return mapConnectionNodes(codeSmells, codeSmell => new CodeSmellResolver(codeSmell))
         }
         async analyzedCommits(
@@ -892,7 +892,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     }
 
     class RepositoryResolver {
-        constructor(public name: string) { }
+        constructor(public name: string) {}
 
         async commits(
             args: GraphQLArgs<ForwardConnectionArguments & GitLogFilters>,
@@ -929,7 +929,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     }
 
     class CodeSmellLifespanResolver {
-        constructor(private lifespan: CodeSmellLifespan) { }
+        constructor(private lifespan: CodeSmellLifespan) {}
 
         get id(): UUID {
             return this.lifespan.id
@@ -988,7 +988,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     }
 
     class CodeSmellResolver {
-        constructor(private codeSmell: CodeSmell) { }
+        constructor(private codeSmell: CodeSmell) {}
         get id(): UUID {
             return this.codeSmell.id
         }
@@ -1044,7 +1044,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     }
 
     class LocationResolver {
-        constructor(private spec: Location & RepoSpec & CommitSpec) { }
+        constructor(private spec: Location & RepoSpec & CommitSpec) {}
         file(): FileResolver {
             return new FileResolver(this.spec)
         }
@@ -1159,7 +1159,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     }
 
     class FileResolver {
-        constructor(private spec: FileSpec & RepoSpec & CommitSpec) { }
+        constructor(private spec: FileSpec & RepoSpec & CommitSpec) {}
 
         path(): string {
             return this.spec.file
