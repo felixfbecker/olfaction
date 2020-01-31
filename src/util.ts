@@ -111,7 +111,7 @@ export const logDuration = <P extends any[], R>(tag: string, fn: (...args: P) =>
     ...args: P
 ): Promise<R> => {
     const start = Date.now()
-    console.log(tag, 'starting')
+    console.log(tag, 'starting', args?.[0]?.length)
     const result = await fn(...args)
     console.log(tag, `${((Date.now() - start) / 1000).toFixed(3)}s`)
     return result

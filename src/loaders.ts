@@ -189,25 +189,31 @@ async function mapCommitRepoSpecsGroupedByRepo<R>(
     return resultsByRepo
 }
 
+// Use a macrotask to schedule, not just a microtask
+const batchScheduleFn = (callback: () => void) => setTimeout(callback, 100)
+
 export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): Loaders => {
     var loaders: Loaders = {
         codeSmell: {
-            byId: new DataLoader<CodeSmell['id'], CodeSmell>(async ids => {
-                const result = await dbPool.query<CodeSmell | NullFields<CodeSmell>>(sql`
+            byId: new DataLoader<CodeSmell['id'], CodeSmell>(
+                async ids => {
+                    const result = await dbPool.query<CodeSmell | NullFields<CodeSmell>>(sql`
                     select code_smells.*
                     from unnest(${ids}::uuid[]) with ordinality as input_id
                     left join code_smells on input_id = code_smells.id
                     order by input_id.ordinality
                 `)
-                return result.rows.map((row, i) => {
-                    const spec: CodeSmellSpec = { codeSmell: ids[i] }
-                    if (!row.id) {
-                        return new UnknownCodeSmellError(spec)
-                    }
-                    loaders.codeSmell.byOrdinal.prime(row, row)
-                    return row
-                })
-            }),
+                    return result.rows.map((row, i) => {
+                        const spec: CodeSmellSpec = { codeSmell: ids[i] }
+                        if (!row.id) {
+                            return new UnknownCodeSmellError(spec)
+                        }
+                        loaders.codeSmell.byOrdinal.prime(row, row)
+                        return row
+                    })
+                },
+                { batchScheduleFn }
+            ),
 
             byOrdinal: new DataLoader<CodeSmellLifespanSpec & Pick<CodeSmell, 'ordinal'>, CodeSmell, string>(
                 async specs => {
@@ -230,7 +236,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         return row
                     })
                 },
-                { cacheKeyFn: ({ lifespan, ordinal }) => `${lifespan}#${ordinal}` }
+                { batchScheduleFn, cacheKeyFn: ({ lifespan, ordinal }) => `${lifespan}#${ordinal}` }
             ),
 
             many: new DataLoader(
@@ -383,6 +389,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         .toArray()
                 }),
                 {
+                    batchScheduleFn,
                     cacheKeyFn: ({ repository, commit, analysis, file, kind, first, after }) =>
                         objectHash({ repository, commit, analysis, file, kind, first, after }),
                 }
@@ -425,7 +432,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         return connectionFromOverfetchedResult(instances, spec, ['id'])
                     })
                 },
-                { cacheKeyFn: args => args.lifespan + connectionArgsKeyFn(args) }
+                { batchScheduleFn, cacheKeyFn: args => args.lifespan + connectionArgsKeyFn(args) }
             ),
         },
 
@@ -467,7 +474,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         return connectionFromOverfetchedResult(analyses, spec, ['name'])
                     })
                 },
-                { cacheKeyFn: connectionArgsKeyFn }
+                { batchScheduleFn, cacheKeyFn: connectionArgsKeyFn }
             ),
             byId: new DataLoader<Analysis['id'], Analysis>(
                 logDuration('loaders.analysis.byId', async ids => {
@@ -613,6 +620,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         .toArray()
                 },
                 {
+                    batchScheduleFn,
                     cacheKeyFn: ({ repository, analysis, kind, first, after }) =>
                         objectHash({ repository, analysis, kind, first, after }),
                 }
@@ -629,6 +637,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                 )
             ),
             {
+                batchScheduleFn,
                 cacheKeyFn: ({ repository, commit, directory }) =>
                     objectHash({ repository, commit, directory }),
             }
@@ -660,7 +669,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         return commit
                     })
                 },
-                { cacheKeyFn: repoAtCommitCacheKeyFn }
+                { batchScheduleFn, cacheKeyFn: repoAtCommitCacheKeyFn }
             ),
         },
 
@@ -672,7 +681,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         git.getFileContent({ repository, commit, repoRoot, file }).catch(err => asError(err)),
                     { concurrency: 100 }
                 ),
-            { cacheKeyFn: spec => repoAtCommitCacheKeyFn(spec) + fileKeyFn(spec) }
+            { batchScheduleFn, cacheKeyFn: spec => repoAtCommitCacheKeyFn(spec) + fileKeyFn(spec) }
         ),
 
         repository: {
@@ -711,7 +720,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         return connectionFromOverfetchedResult(repositories, spec, cursorKey)
                     })
                 }),
-                { cacheKeyFn: spec => spec.analysis + connectionArgsKeyFn(spec) }
+                { batchScheduleFn, cacheKeyFn: spec => spec.analysis + connectionArgsKeyFn(spec) }
             ),
         },
 
@@ -741,7 +750,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         return commit
                     })
                 },
-                { cacheKeyFn: repoAtCommitCacheKeyFn }
+                { batchScheduleFn, cacheKeyFn: repoAtCommitCacheKeyFn }
             ),
 
             forRepository: new DataLoader(
@@ -782,6 +791,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                     )
                 ),
                 {
+                    batchScheduleFn,
                     cacheKeyFn: ({
                         repository,
                         first,
@@ -841,7 +851,7 @@ export const createLoaders = ({ dbPool, repoRoot }: DBContext & RepoRootSpec): L
                         return connectionFromOverfetchedResult(repoCommitSpecs, spec, cursorKey)
                     })
                 }),
-                { cacheKeyFn: spec => spec.analysis + connectionArgsKeyFn(spec) }
+                { batchScheduleFn, cacheKeyFn: spec => spec.analysis + connectionArgsKeyFn(spec) }
             ),
         },
     }
