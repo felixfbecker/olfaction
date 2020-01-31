@@ -14,6 +14,7 @@ import basicAuth from 'express-basic-auth'
 import { initTracerFromEnv } from 'jaeger-client'
 import { Tracer } from 'opentracing'
 import opentracingMiddleware from 'express-opentracing'
+import bodyParser from 'body-parser'
 
 const repoRoot = path.resolve(process.env.REPO_ROOT || path.resolve(process.cwd(), 'repos'))
 const port = (process.env.PORT && parseInt(process.env.PORT, 10)) || 4040
@@ -30,6 +31,8 @@ async function main(): Promise<void> {
     app.use(opentracingMiddleware({ tracer }))
 
     app.use(compression())
+
+    app.use(bodyParser.json({ limit: '1GB' }))
 
     app.use(morgan('dev', { immediate: false }))
 
