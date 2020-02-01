@@ -213,6 +213,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             author: { type: GraphQLNonNull(SignatureType) },
             committer: { type: GraphQLNonNull(SignatureType) },
             parents: { type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CommitType))) },
+            repository: { type: GraphQLNonNull(RepositoryType) },
             combinedFileDifferences: {
                 description:
                     "The file differences between this commit and its parents in [Git's combined diff format](https://git-scm.com/docs/git-diff-tree#_combined_diff_format)." +
@@ -408,7 +409,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 description:
                     'The commits that were analyzed as part of this analysis, across all repositories.',
                 type: GraphQLNonNull(CommitConnectionType),
-                args: forwardConnectionArgs,
+                args: {
+                    ...forwardConnectionArgs,
+                    repository: { type: GraphQLString },
+                },
             },
             codeSmellLifespans: {
                 description: 'The code smell lifespans that were found in this analysis.',
@@ -891,12 +895,13 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             return mapConnectionNodes(codeSmells, codeSmell => new CodeSmellResolver(codeSmell))
         }
         async analyzedCommits(
-            args: ForwardConnectionArguments,
+            args: GraphQLArgs<ForwardConnectionArguments & Partial<RepoSpec>>,
             { loaders }: Context
         ): Promise<Connection<CommitResolver>> {
             const connection = await loaders.commit.forAnalysis.load({
                 ...args,
                 analysis: this.analysis.id,
+                repository: args.repository || undefined,
             })
             return {
                 get pageInfo() {

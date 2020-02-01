@@ -111,7 +111,7 @@ export interface Loaders {
 
         /** Loads the commits (and their repos) that were analyzed in an analysis */
         forAnalysis: DataLoader<
-            AnalysisSpec & ForwardConnectionArguments,
+            AnalysisSpec & ForwardConnectionArguments & Partial<RepoSpec>,
             Connection<RepoSpec & CommitSpec>,
             string
         >
@@ -274,19 +274,7 @@ export const createLoaders = ({
                                 }
                             )
                             // Group by query shape, defined by which filters are passed
-                            .groupBy(
-                                ({
-                                    first,
-                                    after,
-                                    analysis,
-                                    pathPattern,
-                                    kind,
-                                    fileQuery,
-                                    commit,
-                                    repository,
-                                }) =>
-                                    `${!!first}${!!after}${!!analysis}${!!pathPattern}${!!kind}${!!fileQuery}${!!commit}${!!repository}`
-                            )
+                            .groupBy(spec => objectHash(spec, { excludeValues: true }))
                             // Build query
                             .map(specGroup => {
                                 const specArr = specGroup.toArray()
@@ -574,10 +562,7 @@ export const createLoaders = ({
                                 }
                             })
                             // Group by query shape, defined by which filters are passed
-                            .groupBy(
-                                ({ first, after, analysis, kind, repository }) =>
-                                    `${!!first}${!!after}${!!analysis}${!!kind}${!!repository}`
-                            )
+                            .groupBy(spec => objectHash(spec, { excludeValues: true }))
                             // Build query
                             .map(specGroup => {
                                 const specArr = specGroup.toArray()
@@ -868,23 +853,24 @@ export const createLoaders = ({
                     trace(span, 'loaders.commit.forAnalysis', async span => {
                         const cursorKey: CursorKey<RepoSpec & CommitSpec> = ['repository', 'commit']
                         const input = JSON.stringify(
-                            specs.map(({ analysis, first, after }, index) => {
+                            specs.map(({ analysis, repository, first, after }, index) => {
                                 assert(!first || first >= 0, 'Parameter first must be positive')
                                 const cursor =
                                     (after && parseCursor<CommitSpec & RepoSpec>(after, [cursorKey])) ||
                                     undefined
-                                return { index, analysis, first, after: cursor?.value }
+                                return { index, analysis, repository, first, after: cursor?.value }
                             })
                         )
                         const result = await dbPool.query<{
                             repoCommitSpecs: [null] | (RepoSpec & CommitSpec)[]
                         }>(sql`
                             select json_agg(c) as "repoCommitSpecs"
-                            from jsonb_to_recordset(${input}::jsonb) as input("index" int, "analysis" uuid, "first" int, "after" text)
+                            from jsonb_to_recordset(${input}::jsonb) as input("index" int, "analysis" uuid, "repository" text, "first" int, "after" text)
                             left join lateral (
                                 select "commit", "repository"
                                 from analyzed_commits
                                 where analyzed_commits.analysis = input.analysis
+                                and (input.repository is null or analyzed_commits.repository = input.repository)
                                 -- pagination:
                                 and (input.after is null or analyzed_commits."repository" || analyzed_commits."commit" >= input.after) -- include one before to know whether there is a previous page
                                 order by "repository", "commit" asc
@@ -901,7 +887,11 @@ export const createLoaders = ({
                             return connectionFromOverfetchedResult(repoCommitSpecs, spec, cursorKey)
                         })
                     }),
-                { batchScheduleFn, cacheKeyFn: spec => spec.analysis + connectionArgsKeyFn(spec) }
+                {
+                    batchScheduleFn,
+                    cacheKeyFn: ({ analysis, repository, after, first }) =>
+                        objectHash({ analysis, repository, after, first }),
+                }
             ),
         },
     }
