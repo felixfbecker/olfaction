@@ -52,6 +52,7 @@ import {
     CodeSmellSpec,
     CodeSmellLifespanSpec,
     GitObjectID,
+    RepositoryCodeSmellsInput,
 } from '../models'
 import { transaction, mapConnectionNodes, DBContext, withDBConnection } from '../util'
 import { Duration, ZonedDateTime } from '@js-joda/core'
@@ -71,6 +72,8 @@ import pMap from 'p-map'
 import rmfr from 'rmfr'
 import { trace, ParentSpanContext } from '../tracing'
 import { ClientBase } from 'pg'
+import { Span } from 'opentracing'
+import { insertCodeSmell } from '../insert'
 
 type GraphQLArg<T> = T extends undefined ? Exclude<T, undefined> | null : T
 /**
@@ -90,7 +93,8 @@ export interface GraphQLHandler {
     schema: GraphQLSchema
 }
 export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootSpec): GraphQLHandler {
-    const refreshViews = (db: ClientBase) => db.query(sql`refresh materialized view "code_smells_for_commit"`)
+    const refreshViews = (db: ClientBase, span?: Span) =>
+        trace(span, 'refreshViews', () => db.query(sql`refresh materialized view "code_smells_for_commit"`))
 
     var encodingArg: GraphQLFieldConfigArgumentMap = {
         encoding: {
@@ -584,6 +588,34 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         },
     })
 
+    var CommitCodeSmellsInputType = new GraphQLInputObjectType({
+        name: 'CommitCodeSmellsInput',
+        fields: {
+            oid: {
+                description: 'The ID of the commit.',
+                type: GraphQLNonNull(GitObjectIDType),
+            },
+            codeSmells: {
+                description: 'The code smells for the commit.',
+                type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellInputType))),
+            },
+        },
+    })
+
+    var RepositoryCodeSmellsInputType = new GraphQLInputObjectType({
+        name: 'RepositoryCodeSmellsInput',
+        fields: {
+            name: {
+                description: 'The name of the repository (must exist).',
+                type: GraphQLNonNull(GraphQLString),
+            },
+            commits: {
+                description: 'The code smells to add by commit.',
+                type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CommitCodeSmellsInputType))),
+            },
+        },
+    })
+
     const schema = new GraphQLSchema({
         query: new GraphQLObjectType({
             name: 'Query',
@@ -660,21 +692,13 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     name: 'AddCodeSmells',
                     description: 'Add code smells for a commit of a repository to an analysis.',
                     inputFields: {
-                        repository: {
-                            description: 'The repository to add code smells for.',
-                            type: GraphQLNonNull(GraphQLString),
-                        },
-                        commit: {
-                            description: 'The commit to add code smells for.',
-                            type: GraphQLNonNull(GitObjectIDType),
-                        },
                         analysis: {
                             description: 'The name of the analysis the code smells should be added to.',
                             type: GraphQLNonNull(GraphQLString),
                         },
-                        codeSmells: {
-                            description: 'The code smells to add.',
-                            type: GraphQLNonNull(GraphQLList(GraphQLNonNull(CodeSmellInputType))),
+                        repositories: {
+                            description: 'The code smells to add by repository.',
+                            type: GraphQLNonNull(GraphQLList(GraphQLNonNull(RepositoryCodeSmellsInputType))),
                         },
                     },
                     outputFields: {
@@ -685,87 +709,73 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     },
                     mutateAndGetPayload: async (
                         {
-                            repository,
-                            commit,
+                            repositories,
                             analysis,
-                            codeSmells,
                         }: {
-                            repository: string
-                            commit: string
-
                             /** Analysis name */
                             analysis: string
-                            codeSmells: CodeSmellInput[]
+                            repositories: RepositoryCodeSmellsInput[]
                         },
-                        { loaders }: Context
+                        { loaders, span }: Context
                     ): Promise<{ codeSmells: CodeSmellResolver[] }> => {
-                        await checkRepositoryExists({ repository, repoRoot })
-                        await checkCommitExists({ repository, commit, repoRoot })
                         const codeSmellResolvers = await withDBConnection(dbPool, db =>
-                            transaction(db, async () => {
+                            transaction(db, span, async () => {
+                                // Get analysis ID, check if exists
+                                const analysisResult = await db.query<{
+                                    id: UUID
+                                }>(sql`select id from analyses where "name" = ${analysis}`)
+                                if (analysisResult.rows.length === 0) {
+                                    throw new UnknownAnalysisError({ name: analysis })
+                                }
+                                const analysisId = analysisResult.rows[0].id
+
                                 const codeSmellResolvers = await pMap(
-                                    codeSmells,
-                                    async ({ kind, message, locations, lifespan, ordinal }) => {
-                                        // Normalization
-                                        message = message?.trim() || null
-                                        locations = locations || []
-                                        for (const location of locations) {
-                                            if (path.posix.isAbsolute(location.file)) {
-                                                throw new Error(
-                                                    `File path must be relative to repository root: ${location.file}`
+                                    repositories,
+                                    async repositoryInput => {
+                                        await checkRepositoryExists({
+                                            repository: repositoryInput.name,
+                                            repoRoot,
+                                        })
+                                        return pMap(
+                                            repositoryInput.commits,
+                                            async commitInput => {
+                                                await checkCommitExists({
+                                                    repository: repositoryInput.name,
+                                                    commit: commitInput.oid,
+                                                    repoRoot,
+                                                })
+                                                await db.query<{}>(sql`
+                                                    insert into analyzed_commits (analysis, repository, "commit")
+                                                    values (${analysisId}, ${repositoryInput.name}, ${commitInput.oid})
+                                                    on conflict on constraint analysed_revisions_pkey do nothing
+                                                `)
+                                                return pMap(
+                                                    commitInput.codeSmells,
+                                                    async codeSmellInput =>
+                                                        new CodeSmellResolver(
+                                                            await insertCodeSmell(
+                                                                {
+                                                                    analysisId,
+                                                                    repositoryName: repositoryInput.name,
+                                                                    commitOid: commitInput.oid,
+                                                                },
+                                                                codeSmellInput,
+                                                                { db, loaders }
+                                                            )
+                                                        ),
+                                                    { concurrency: 10 }
                                                 )
-                                            }
-                                            location.file = path.normalize(location.file)
-                                        }
-                                        locations = sortBy(locations, [
-                                            l => l.file,
-                                            l => l.range.start.line,
-                                            l => l.range.start.character,
-                                            l => l.range.end.line,
-                                            l => l.range.end.character,
-                                        ])
-
-                                        const locationsJson = JSON.stringify(locations)
-
-                                        const analysisResult = await db.query<{ id: UUID }>(sql`
-                                            select id from analyses where "name" = ${analysis}
-                                        `)
-                                        if (analysisResult.rows.length === 0) {
-                                            throw new UnknownAnalysisError({ name: analysis })
-                                        }
-                                        const analysisId = analysisResult.rows[0].id
-
-                                        // Get or create lifespan with ID passed from client
-                                        const lifespanResult = await db.query<{ id: UUID }>(sql`
-                                            insert into code_smell_lifespans (id, kind, repository, analysis)
-                                            values (${lifespan}, ${kind}, ${repository}, ${analysisId})
-                                            on conflict on constraint code_smell_lifespans_pkey do nothing
-                                            returning id
-                                        `)
-                                        await db.query<{}>(sql`
-                                            insert into analyzed_commits (analysis, repository, "commit")
-                                            values (${analysisId}, ${repository}, ${commit})
-                                            on conflict on constraint analysed_revisions_pkey do nothing
-                                        `)
-                                        const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
-                                        const result = await db.query<CodeSmell>(sql`
-                                            insert into code_smells
-                                                        ("commit", "message", locations, lifespan, ordinal)
-                                            values      (${commit}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
-                                            returning   id, "commit", "message", locations, lifespan, ordinal
-                                        `)
-                                        const codeSmell = result.rows[0]
-                                        loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
-                                        loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
-                                        return new CodeSmellResolver(codeSmell)
+                                            },
+                                            { concurrency: 10 }
+                                        )
                                     },
-                                    { concurrency: 100 }
+                                    { concurrency: 10 }
                                 )
-                                await refreshViews(db)
+                                await refreshViews(db, span)
                                 return codeSmellResolvers
                             })
                         )
-                        return { codeSmells: codeSmellResolvers }
+                        return { codeSmells: codeSmellResolvers.flat(2) }
                     },
                 }),
                 deleteAnalysis: mutationWithClientMutationId({
@@ -773,16 +783,16 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     description: 'Delete an analysis and all its code smells. Repositories are not deleted.',
                     inputFields: { name: { type: GraphQLNonNull(GraphQLString) } },
                     outputFields: {},
-                    mutateAndGetPayload: async ({ name }: AnalysisName) =>
+                    mutateAndGetPayload: async ({ name }: AnalysisName, { span }: Context) =>
                         withDBConnection(dbPool, db =>
-                            transaction(db, async () => {
+                            transaction(db, span, async () => {
                                 const result = await db.query(
                                     sql`delete from analyses where "name" = ${name}`
                                 )
                                 if (result.rowCount === 0) {
                                     throw new UnknownAnalysisError({ name })
                                 }
-                                await refreshViews(db)
+                                await refreshViews(db, span)
                                 return {}
                             })
                         ),
@@ -797,10 +807,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                         },
                     },
                     outputFields: {},
-                    mutateAndGetPayload: async ({ repository }: RepoSpec) => {
+                    mutateAndGetPayload: async ({ repository }: RepoSpec, { span }: Context) => {
                         await checkRepositoryExists({ repository, repoRoot })
                         await withDBConnection(dbPool, async db => {
-                            await transaction(db, async () => {
+                            await transaction(db, span, async () => {
                                 await db.query(
                                     sql`delete from code_smell_lifespans where repository = ${repository}`
                                 )
@@ -808,7 +818,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                     sql`delete from analyzed_commits where repository = ${repository}`
                                 )
                             })
-                            await refreshViews(db)
+                            await refreshViews(db, span)
                             await rmfr(resolveRepoDir({ repoRoot, repository }))
                         })
                         return {}
@@ -819,16 +829,16 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     description: 'Delete a code smell instance.',
                     inputFields: { id: { type: GraphQLNonNull(GraphQLID) } },
                     outputFields: {},
-                    mutateAndGetPayload: async ({ codeSmell }: CodeSmellSpec) => {
+                    mutateAndGetPayload: async ({ codeSmell }: CodeSmellSpec, { span }: Context) => {
                         await withDBConnection(dbPool, async db => {
-                            await transaction(db, async () => {
+                            await transaction(db, span, async () => {
                                 const result = await dbPool.query(
                                     sql`delete from code_smells where id = ${codeSmell}`
                                 )
                                 if (result.rowCount === 0) {
                                     throw new UnknownCodeSmellError({ codeSmell })
                                 }
-                                await refreshViews(db)
+                                await refreshViews(db, span)
                             })
                         })
                         return {}
@@ -839,16 +849,16 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                     description: 'Delete a code smell lifespan and its instances.',
                     inputFields: { id: { type: GraphQLNonNull(GraphQLID) } },
                     outputFields: {},
-                    mutateAndGetPayload: async ({ lifespan }: CodeSmellLifespanSpec) => {
+                    mutateAndGetPayload: async ({ lifespan }: CodeSmellLifespanSpec, { span }: Context) => {
                         await withDBConnection(dbPool, async db => {
-                            await transaction(db, async () => {
+                            await transaction(db, span, async () => {
                                 const result = await db.query(
                                     sql`delete from code_smell_lifespans where id = ${lifespan}`
                                 )
                                 if (result.rowCount === 0) {
                                     throw new UnknownCodeSmellLifespanError({ lifespan })
                                 }
-                                await refreshViews(db)
+                                await refreshViews(db, span)
                             })
                         })
                         return {}

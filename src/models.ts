@@ -83,6 +83,16 @@ export interface CodeSmell {
     commit: GitObjectID
 }
 
+export interface RepositoryCodeSmellsInput {
+    name: string
+    commits: CommitCodeSmellsInput[]
+}
+
+export interface CommitCodeSmellsInput {
+    oid: GitObjectID
+    codeSmells: CodeSmellInput[]
+}
+
 export interface CodeSmellInput {
     lifespan: UUID
     ordinal: number

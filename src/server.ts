@@ -32,7 +32,7 @@ async function main(): Promise<void> {
 
     app.use(compression())
 
-    app.use(bodyParser.json({ limit: '1GB' }))
+    app.use(bodyParser.json({ limit: '2GB' }))
 
     app.use(morgan('dev', { immediate: false }))
 

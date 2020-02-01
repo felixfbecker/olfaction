@@ -3,6 +3,8 @@ import sql from 'sql-template-strings'
 import { Connection } from 'graphql-relay'
 import { ExecutionResult } from 'graphql'
 import { isEqual } from 'lodash'
+import { Span } from 'opentracing'
+import { trace } from './tracing'
 
 export function keyBy<K, V>(items: Iterable<V>, by: (value: V) => K): Map<K, V> {
     const map = new Map<K, V>()
@@ -25,16 +27,24 @@ export async function withDBConnection<R>(pool: Pool, fn: (client: ClientBase) =
     }
 }
 
-export async function transaction<T>(db: ClientBase, fn: () => Promise<T>): Promise<T> {
-    await db.query(sql`BEGIN`)
-    try {
-        const result = await fn()
-        await db.query(sql`COMMIT`)
-        return result
-    } catch (err) {
-        await db.query(sql`ROLLBACK`)
-        throw err
-    }
+export async function transaction<T>(
+    db: ClientBase,
+    span: Span | undefined,
+    fn: () => Promise<T>
+): Promise<T> {
+    return trace(span, 'transaction', async () => {
+        await db.query(sql`BEGIN`)
+        try {
+            const result = await fn()
+            // eslint-disable-next-line no-unused-expressions
+            span?.log({ event: 'transaction.commit' })
+            await db.query(sql`COMMIT`)
+            return result
+        } catch (err) {
+            await db.query(sql`ROLLBACK`)
+            throw err
+        }
+    })
 }
 
 /** Encode a string to Base64 */
