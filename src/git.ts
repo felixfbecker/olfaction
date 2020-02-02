@@ -132,7 +132,7 @@ const parseCommit = (chunk: string): Commit => {
     ] = chunk.split('\n')
     return {
         oid,
-        parents: parentHashes.split(' '),
+        parents: parentHashes === '' ? [] : parentHashes.split(' '),
         author: {
             name: authorName,
             email: authorEmail,
