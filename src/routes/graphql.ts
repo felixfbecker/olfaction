@@ -452,6 +452,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 type: GraphQLNonNull(CodeSmellLifespanType),
                 description: 'The complete lifespan of this code smell throughout commit history.',
             },
+            ordinal: {
+                type: GraphQLNonNull(GraphQLInt),
+                description: 'The position of the code smell in its lifespan.',
+            },
             predecessor: {
                 type: CodeSmellType,
                 description:
@@ -1044,6 +1048,9 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         }
         get message(): string {
             return this.codeSmell.message
+        }
+        get ordinal(): number {
+            return this.codeSmell.ordinal
         }
         async lifespan(args: {}, { loaders }: Context) {
             const lifespan = (await loaders.codeSmellLifespan.oneById.load(this.codeSmell.lifespan))!
