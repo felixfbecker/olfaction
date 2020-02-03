@@ -1311,7 +1311,8 @@ export const createGraphQLHTTPHandler = (options: GraphQLHandler & DBContext & R
         customFormatErrorFn: err => {
             console.error(err.originalError)
             return {
-                name: err.originalError ? err.originalError.name : err.name,
+                name: err.originalError?.name,
+                detail: (err.originalError as any)?.detail,
                 ...formatError(err),
                 stack: err.stack!.split('\n'),
             }
