@@ -774,7 +774,7 @@ export const createLoaders = ({
                                             ordinality,
                                             nullif(spec->>'analysis', '')::uuid as "analysis",
                                             nullif(spec->'first', 'null')::int as "first",
-                                            nullif(spec->>'after', '')::uuid as "after"
+                                            nullif(spec->>'after', '')::text as "after"
                                         from rows from (unnest(${specArr}::jsonb[])) with ordinality as spec
                                     )
                                     select json_agg(l order by l."repository" asc) as "repositories"
@@ -944,7 +944,7 @@ export const createLoaders = ({
                                             nullif(spec->>'repository', '')::text as "repository",
                                             nullif(spec->>'analysis', '')::uuid as "analysis",
                                             nullif(spec->'first', 'null')::int as "first",
-                                            nullif(spec->>'after', '')::uuid as "after"
+                                            nullif(spec->>'after', '')::text as "after"
                                         from rows from (unnest(${specArr}::jsonb[])) with ordinality as spec
                                     )
                                     select json_agg(c order by c."repository", c."commit" asc) as "repoCommitSpecs"
