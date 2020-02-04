@@ -134,10 +134,10 @@ export const makeCursorFromKey = <T extends object>(cursorKey: CursorKey<T>) => 
 
 /**
  * Creates a connection from a DB result page that was fetched with one more
- * item before and after than requested (if possible), which will be stripped
+ * item after than requested (if possible), which will be stripped
  * and used to determine pagination info.
  *
- * @param result The result array from the DB with one more item at the beginning and end.
+ * @param result The result array from the DB with one more item at the end.
  * @param args The pagination options that were given.
  * @param cursorKey The (potentially compound) key that was used to order the result and is used to determine the cursor.
  */
@@ -155,7 +155,6 @@ const connectionFromOverfetchedResult = <T extends object>(
                 return makeCursor(node, index)
             },
         }))
-        .skip(after ? 1 : 0)
         .take(first ?? Infinity)
         .toArray()
     return {
@@ -339,7 +338,7 @@ export const createLoaders = ({
                                     `)
                                 }
                                 if (firstSpec.after) {
-                                    query.append(sql` and code_smells_for_commit."id" >= input."after" `)
+                                    query.append(sql` and code_smells_for_commit."id" > input."after" `)
                                 }
                                 if (typeof firstSpec.first === 'number') {
                                     query.append(sql` order by code_smells_for_commit.id asc `)
@@ -453,7 +452,7 @@ export const createLoaders = ({
                                 `
                                 // Pagination
                                 if (firstSpec.after) {
-                                    query.append(sql` and code_smells.ordinal >= input.after `)
+                                    query.append(sql` and code_smells.ordinal > input.after `)
                                 }
                                 if (typeof firstSpec.first === 'number') {
                                     query.append(sql`
@@ -516,7 +515,7 @@ export const createLoaders = ({
                                 select analyses.*
                                 from analyses
                                 -- pagination:
-                                where (input.after is null or analyses.id >= input.after) -- include one before to know whether there is a previous page
+                                where (input.after is null or analyses.id > input.after) -- include one before to know whether there is a previous page
                                 order by analyses."name" asc
                                 limit input.first + 1 -- query one more to know whether there is a next page
                             ) a on true
@@ -641,7 +640,7 @@ export const createLoaders = ({
                                 }
                                 if (firstSpec.after) {
                                     // include one before to know whether there is a previous page
-                                    query.append(sql` and code_smell_lifespans.id >= input.after `)
+                                    query.append(sql` and code_smell_lifespans.id > input.after `)
                                 }
                                 if (typeof firstSpec.first === 'number') {
                                     query.append(sql` order by code_smell_lifespans.id asc `)
@@ -787,7 +786,7 @@ export const createLoaders = ({
                                 `
                                 // Pagination
                                 if (firstSpec.after) {
-                                    query.append(sql` and analyzed_commits.repository >= input.after `)
+                                    query.append(sql` and analyzed_commits.repository > input.after `)
                                 }
                                 if (typeof firstSpec.first === 'number') {
                                     query.append(sql`
@@ -872,7 +871,9 @@ export const createLoaders = ({
                                             repoRoot,
                                             repository,
                                             startRevision,
-                                            skip: afterOffset,
+                                            // Using offset-based pagination is okay because
+                                            // the git history after a given start commit is immutable.
+                                            skip: afterOffset && afterOffset + 1,
                                             maxCount: typeof first === 'number' ? first + 1 : undefined,
                                         })
                                         .tap((commit: Commit) =>
@@ -958,7 +959,7 @@ export const createLoaders = ({
                                 }
                                 if (firstSpec.after) {
                                     query.append(
-                                        sql` and analyzed_commits."repository" || analyzed_commits."commit" >= input.after `
+                                        sql` and analyzed_commits."repository" || analyzed_commits."commit" > input.after `
                                     )
                                 }
                                 if (typeof firstSpec.first === 'number') {
