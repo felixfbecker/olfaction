@@ -170,13 +170,13 @@ export const createRestRouter = ({
                 query($name: String!, $first: Int, $after: String) {
                     analysis(name: $name) {
                         analyzedRepositories(first: $first, after: $after) {
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
                             edges {
                                 node {
                                     name
-                                }
-                                pageInfo {
-                                    hasNextPage
-                                    endCursor
                                 }
                             }
                         }
