@@ -95,9 +95,6 @@ export interface GraphQLHandler {
     schema: GraphQLSchema
 }
 export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootSpec): GraphQLHandler {
-    const refreshViews = (db: ClientBase, span?: Span) =>
-        trace(span, 'refreshViews', () => db.query(sql`refresh materialized view "code_smells_for_commit"`))
-
     var encodingArg: GraphQLFieldConfigArgumentMap = {
         encoding: {
             type: GraphQLString,
@@ -785,7 +782,6 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                     },
                                     { concurrency: 10 }
                                 )
-                                await refreshViews(db, span)
                                 return codeSmellResolvers
                             })
                         )
@@ -806,7 +802,6 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                 if (result.rowCount === 0) {
                                     throw new UnknownAnalysisError({ name })
                                 }
-                                await refreshViews(db, span)
                                 return {}
                             })
                         ),
@@ -832,7 +827,6 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                     sql`delete from analyzed_commits where repository = ${repository}`
                                 )
                             })
-                            await refreshViews(db, span)
                             await rmfr(resolveRepoDir({ repoRoot, repository }))
                         })
                         return {}
@@ -852,7 +846,6 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                 if (result.rowCount === 0) {
                                     throw new UnknownCodeSmellError({ codeSmell })
                                 }
-                                await refreshViews(db, span)
                             })
                         })
                         return {}
@@ -872,7 +865,6 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                                 if (result.rowCount === 0) {
                                     throw new UnknownCodeSmellLifespanError({ lifespan })
                                 }
-                                await refreshViews(db, span)
                             })
                         })
                         return {}
