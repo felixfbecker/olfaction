@@ -1003,15 +1003,28 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         async duration(args: {}, { loaders }: Context): Promise<string> {
             const { repository, id: lifespan } = this.lifespan
             const instances = (await loaders.codeSmell.forLifespan.load({ lifespan }))!
-            const start = (await loaders.commit.byOid.load({
-                repository,
-                commit: instances.edges[0].node.commit,
-            }))!.committer.date
-            const end = (await loaders.commit.byOid.load({
-                repository,
-                commit: last(instances.edges)!.node.commit,
-            }))!.committer.date
-            return Duration.between(ZonedDateTime.parse(start), ZonedDateTime.parse(end)).toString()
+            const start = ZonedDateTime.parse(
+                (await loaders.commit.byOid.load({
+                    repository,
+                    commit: instances.edges[0].node.commit,
+                }))!.committer.date
+            )
+            const end = ZonedDateTime.parse(
+                (await loaders.commit.byOid.load({
+                    repository,
+                    commit: last(instances.edges)!.node.commit,
+                }))!.committer.date
+            )
+            const duration = Duration.between(start, end)
+            if (duration.isNegative()) {
+                // git allows manually specifying dates, so this possible.
+                throw new Error(
+                    `End code smell ${instances.edges[0].node.id} of lifespan ${
+                        this.lifespan.id
+                    } is before start code smell ${last(instances.edges)!.node.id}`
+                )
+            }
+            return duration.toString()
         }
 
         async interval(args: {}, { loaders }: Context): Promise<string> {
