@@ -1,9 +1,8 @@
 import * as path from 'path'
 import { sortBy } from 'lodash'
 import sql from 'sql-template-strings'
-import { CodeSmell, CodeSmellInput, UUID, GitObjectID } from './models'
+import { CodeSmell, CodeSmellInput, UUID, GitObjectID, CodeSmellLifespan } from './models'
 import { ClientBase } from 'pg'
-import { DBContext } from './util'
 import { Loaders } from './loaders'
 
 /**
@@ -41,24 +40,34 @@ export async function insertCodeSmell(
 
     const locationsJson = JSON.stringify(locations)
 
-    // Get or create lifespan with ID passed from client
-    const lifespanResult = await db.query<{
-        id: UUID
-    }>(sql`
+    // Create lifespan with ID passed from client if not exists
+    await db.query(sql`
         insert into code_smell_lifespans (id, kind, repository, analysis)
         values (${lifespan}, ${kind}, ${repositoryName}, ${analysisId})
         on conflict on constraint code_smell_lifespans_pkey do nothing
-        returning id
     `)
-    const lifespanId = lifespanResult.rows[0]?.id ?? lifespan // if not defined, it already existed
     const result = await db.query<CodeSmell>(sql`
         insert into code_smells
-                    ("commit", "message", locations, lifespan, ordinal)
-        values      (${commitOid}, ${message}, ${locationsJson}::jsonb, ${lifespanId}, ${ordinal})
-        returning   id, "commit", "message", locations, lifespan, ordinal
+                    (analysis, repository, kind, "commit", "message", locations, lifespan, ordinal)
+        values      (${analysisId}, ${repositoryName}, ${kind}, ${commitOid}, ${message}, ${locationsJson}::jsonb, ${lifespan}, ${ordinal})
+        returning   id
     `)
-    const codeSmell = result.rows[0]
+    const codeSmell: CodeSmell = {
+        id: result.rows[0].id,
+        commit: commitOid,
+        message,
+        locations,
+        lifespan,
+        ordinal,
+    }
+    const codeSmellLifespan: CodeSmellLifespan = {
+        id: lifespan,
+        kind,
+        analysis: analysisId,
+        repository: repositoryName,
+    }
     loaders.codeSmell.byId.prime(codeSmell.id, codeSmell)
     loaders.codeSmell.byOrdinal.prime(codeSmell, codeSmell)
+    loaders.codeSmellLifespan.oneById.prime(lifespan, codeSmellLifespan)
     return codeSmell
 }

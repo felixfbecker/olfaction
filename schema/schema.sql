@@ -65,34 +65,44 @@ CREATE TABLE public.code_smell_lifespans (
 --
 
 CREATE TABLE public.code_smells (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
     message text,
     commit text NOT NULL,
     locations jsonb,
     lifespan uuid NOT NULL,
     ordinal integer NOT NULL,
+    repository text NOT NULL,
+    kind text NOT NULL,
+    analysis uuid NOT NULL,
+    id integer NOT NULL,
     CONSTRAINT code_smells_locations_check CHECK (((jsonb_typeof(locations) = 'array'::text) AND (jsonb_array_length(locations) <> 0)))
 );
 
 
 --
--- Name: code_smells_for_commit; Type: MATERIALIZED VIEW; Schema: public; Owner: -
+-- Name: code_smells_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
-CREATE MATERIALIZED VIEW public.code_smells_for_commit AS
- SELECT c.id,
-    c.commit,
-    c.locations,
-    c.message,
-    c.ordinal,
-    c.lifespan,
-    l.repository,
-    l.kind,
-    l.analysis
-   FROM (public.code_smells c
-     JOIN public.code_smell_lifespans l ON ((c.lifespan = l.id)))
-  ORDER BY c.id
-  WITH NO DATA;
+CREATE SEQUENCE public.code_smells_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: code_smells_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.code_smells_id_seq OWNED BY public.code_smells.id;
+
+
+--
+-- Name: code_smells id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.code_smells ALTER COLUMN id SET DEFAULT nextval('public.code_smells_id_seq'::regclass);
 
 
 --
@@ -128,11 +138,11 @@ ALTER TABLE ONLY public.code_smell_lifespans
 
 
 --
--- Name: code_smells code_smells_lifespan_lifespan_index_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: code_smells code_smells_lifespan_ordinal_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.code_smells
-    ADD CONSTRAINT code_smells_lifespan_lifespan_index_key UNIQUE (lifespan, ordinal);
+    ADD CONSTRAINT code_smells_lifespan_ordinal_key UNIQUE (lifespan, ordinal);
 
 
 --
@@ -172,45 +182,10 @@ CREATE INDEX code_smell_lifespans_repository_idx ON public.code_smell_lifespans 
 
 
 --
--- Name: code_smells_commit_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: code_smells_kind_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX code_smells_commit_idx ON public.code_smells USING btree (commit);
-
-
---
--- Name: code_smells_for_commit_analysis_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX code_smells_for_commit_analysis_idx ON public.code_smells_for_commit USING btree (analysis);
-
-
---
--- Name: code_smells_for_commit_kind_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX code_smells_for_commit_kind_idx ON public.code_smells_for_commit USING btree (kind);
-
-
---
--- Name: code_smells_for_commit_lifespan_ordinal_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX code_smells_for_commit_lifespan_ordinal_idx ON public.code_smells_for_commit USING btree (lifespan, ordinal);
-
-
---
--- Name: code_smells_for_commit_locations_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX code_smells_for_commit_locations_idx ON public.code_smells_for_commit USING gin (locations);
-
-
---
--- Name: code_smells_for_commit_repository_commit_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX code_smells_for_commit_repository_commit_idx ON public.code_smells_for_commit USING btree (repository, commit);
+CREATE INDEX code_smells_kind_idx ON public.code_smells USING btree (kind);
 
 
 --
@@ -235,6 +210,20 @@ CREATE INDEX code_smells_locations_idx ON public.code_smells USING gin (location
 
 
 --
+-- Name: code_smells_ordinal_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_smells_ordinal_idx ON public.code_smells USING btree (ordinal);
+
+
+--
+-- Name: code_smells_repository_commit_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX code_smells_repository_commit_idx ON public.code_smells USING btree (repository, commit);
+
+
+--
 -- Name: analyzed_commits analysed_revisions_analysis_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -248,6 +237,14 @@ ALTER TABLE ONLY public.analyzed_commits
 
 ALTER TABLE ONLY public.code_smell_lifespans
     ADD CONSTRAINT code_smell_lifespans_analysis_fkey FOREIGN KEY (analysis) REFERENCES public.analyses(id) ON DELETE CASCADE;
+
+
+--
+-- Name: code_smells code_smells_analysis_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.code_smells
+    ADD CONSTRAINT code_smells_analysis_fkey FOREIGN KEY (analysis) REFERENCES public.analyses(id) ON DELETE CASCADE;
 
 
 --

@@ -20,6 +20,7 @@ export interface CodeSmellLifespan {
     id: UUID
     kind: string
     repository: string
+    /** The analysis ID. */
     analysis: UUID
 }
 
@@ -75,8 +76,8 @@ export interface CombinedFileDifference {
 }
 
 export interface CodeSmell {
-    id: UUID
-    message: string
+    id: number
+    message: string | null
     locations: Location[]
     lifespan: UUID
     ordinal: number
@@ -110,7 +111,7 @@ export interface CodeSmellLifespanSpec {
 }
 
 export interface CodeSmellSpec {
-    codeSmell: UUID
+    codeSmell: number
 }
 
 export interface RepoSpec {

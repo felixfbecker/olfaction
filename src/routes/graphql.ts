@@ -63,6 +63,8 @@ import {
     Connection,
     connectionFromArray,
     mutationWithClientMutationId,
+    toGlobalId,
+    fromGlobalId,
 } from 'graphql-relay'
 import { last, identity, sortBy } from 'lodash'
 import sloc from 'sloc'
@@ -477,7 +479,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
     var CodeSmellLifespanType = new GraphQLObjectType({
         name: 'CodeSmellLifespan',
         description: 'A lifespan of a code smell throughout commit history.',
-        fields: {
+        fields: () => ({
             id: {
                 type: GraphQLNonNull(GraphQLID),
             },
@@ -508,6 +510,7 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 type: GraphQLNonNull(RepositoryType),
                 description: 'The repository the code smell was detected in.',
             },
+        }),
     })
 
     var { connectionType: CodeSmellLifespanConnectionType } = connectionDefinitions({
@@ -1050,11 +1053,11 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
 
     class CodeSmellResolver {
         constructor(private codeSmell: CodeSmell) {}
-        get id(): UUID {
-            return this.codeSmell.id
+        get id(): string {
+            return toGlobalId('CodeSmell', this.codeSmell.id + '')
         }
-        get message(): string {
-            return this.codeSmell.message
+        get message(): string | null {
+            return this.codeSmell.message || null
         }
         get ordinal(): number {
             return this.codeSmell.ordinal
@@ -1276,8 +1279,13 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 args
             )
         },
-        async codeSmell({ id }: { id: UUID }, { loaders }: Context) {
-            const codeSmell = await loaders.codeSmell.byId.load(id)
+        async codeSmell({ id }: { id: string }, { loaders }: Context) {
+            const resolvedId = fromGlobalId(id)
+            const numericId = parseInt(resolvedId.id, 10)
+            if (resolvedId.type !== 'CodeSmell' || isNaN(numericId)) {
+                throw new Error('Invalid CodeSmell ID ' + id)
+            }
+            const codeSmell = await loaders.codeSmell.byId.load(numericId)
             return new CodeSmellResolver(codeSmell)
         },
         async codeSmellLifespan({ id }: { id: UUID }, { loaders }: Context) {

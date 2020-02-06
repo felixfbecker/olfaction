@@ -210,7 +210,7 @@ export const createLoaders = ({
                     trace(span, 'loaders.codeSmell.byId', async span => {
                         const result = await dbPool.query<CodeSmell | NullFields<CodeSmell>>(sql`
                             select code_smells.*
-                            from unnest(${ids}::uuid[]) with ordinality as input_id
+                            from unnest(${ids}::int[]) with ordinality as input_id
                             left join code_smells on input_id = code_smells.id
                             order by input_id.ordinality
                         `)
@@ -266,7 +266,7 @@ export const createLoaders = ({
                                 ({ repository, commit, analysis, file, kind, pathPattern, first, after }) => {
                                     assert(!first || first >= 0, 'Parameter first must be positive')
                                     const cursor =
-                                        (after && parseCursor<CodeSmell>(after, ['id'])) || undefined
+                                        (after && parseCursor<CodeSmell>(after, [['id']])) || undefined
                                     return {
                                         repository: repository || undefined,
                                         commit: commit || undefined,
@@ -275,7 +275,7 @@ export const createLoaders = ({
                                         kind: kind || undefined,
                                         analysis: analysis || undefined,
                                         first,
-                                        after: cursor?.value,
+                                        after: cursor && parseInt(cursor.value, 10),
                                     }
                                 }
                             )
@@ -296,7 +296,7 @@ export const createLoaders = ({
                                             nullif(spec->>'pathPattern', '')::text as "pathPattern",
                                             nullif(spec->>'kind', '')::text as "kind",
                                             nullif(spec->'first', 'null')::int as "first",
-                                            nullif(spec->>'after', '')::uuid as "after"
+                                            nullif(spec->>'after', '')::int as "after"
                                         from rows from (unnest(${specArr}::jsonb[])) with ordinality as spec
                                     )
                                     select json_agg(c order by c.id) as "codeSmells"
@@ -304,44 +304,38 @@ export const createLoaders = ({
                                     left join lateral (
                                         select "id", "message", "ordinal", "lifespan", "commit", "locations",
                                             jsonb_build_object('id', lifespan, 'repository', repository, 'kind', kind, 'analysis', analysis) as "lifespanObject"
-                                        from code_smells_for_commit
+                                        from code_smells
                                         where true
                                 `
                                 if (firstSpec.repository) {
-                                    query.append(
-                                        sql` and code_smells_for_commit."repository" = input."repository" `
-                                    )
+                                    query.append(sql` and code_smells."repository" = input."repository" `)
                                 }
                                 if (firstSpec.analysis) {
-                                    query.append(
-                                        sql` and code_smells_for_commit."analysis" = input."analysis" `
-                                    )
+                                    query.append(sql` and code_smells."analysis" = input."analysis" `)
                                 }
                                 if (firstSpec.kind) {
-                                    query.append(sql` and code_smells_for_commit."kind" = input."kind" `)
+                                    query.append(sql` and code_smells."kind" = input."kind" `)
                                 }
                                 if (firstSpec.commit) {
-                                    query.append(sql` and code_smells_for_commit."commit" = input."commit" `)
+                                    query.append(sql` and code_smells."commit" = input."commit" `)
                                 }
                                 if (firstSpec.fileQuery) {
-                                    query.append(
-                                        sql` and code_smells_for_commit."locations" @> input."fileQuery" `
-                                    )
+                                    query.append(sql` and code_smells."locations" @> input."fileQuery" `)
                                 }
                                 if (firstSpec.pathPattern) {
                                     query.append(sql`
                                         and exists (
                                             select "file"
-                                            from jsonb_to_recordset(code_smells_for_commit.locations) as locations("file" text)
+                                            from jsonb_to_recordset(code_smells.locations) as locations("file" text)
                                             where "file" ~* input."pathPattern"
                                         )
                                     `)
                                 }
                                 if (firstSpec.after) {
-                                    query.append(sql` and code_smells_for_commit."id" > input."after" `)
+                                    query.append(sql` and code_smells."id" > input."after" `)
                                 }
                                 if (typeof firstSpec.first === 'number') {
-                                    query.append(sql` order by code_smells_for_commit.id asc `)
+                                    query.append(sql` order by code_smells.id asc `)
                                     // query one more to know whether there is a next page
                                     query.append(sql` limit input.first + 1 `)
                                 }
@@ -440,7 +434,7 @@ export const createLoaders = ({
                                             ordinality,
                                             nullif(spec->>'lifespan', '')::uuid as "lifespan",
                                             nullif(spec->'first', 'null')::int as "first",
-                                            nullif(spec->>'after', '')::uuid as "after"
+                                            nullif(spec->>'after', '')::int as "after"
                                         from rows from (unnest(${specArr}::jsonb[])) with ordinality as spec
                                     )
                                     select json_agg(c order by c."ordinal") as instances
@@ -502,7 +496,8 @@ export const createLoaders = ({
                         const input = JSON.stringify(
                             specs.map(({ first, after }, index) => {
                                 assert(!first || first >= 0, 'Parameter first must be positive')
-                                const cursor = (after && parseCursor<Analysis>(after, ['name'])) || undefined
+                                const cursor =
+                                    (after && parseCursor<Analysis>(after, [['name']])) || undefined
                                 return { index, first, after: cursor?.value }
                             })
                         )
@@ -515,7 +510,7 @@ export const createLoaders = ({
                                 select analyses.*
                                 from analyses
                                 -- pagination:
-                                where (input.after is null or analyses.id > input.after) -- include one before to know whether there is a previous page
+                                where (input.after is null or analyses.id > input.after)
                                 order by analyses."name" asc
                                 limit input.first + 1 -- query one more to know whether there is a next page
                             ) a on true
@@ -594,7 +589,7 @@ export const createLoaders = ({
                             .map(({ repository, analysis, kind, first, after }) => {
                                 assert(!first || first >= 0, 'Parameter first must be positive')
                                 const cursor =
-                                    (after && parseCursor<CodeSmellLifespan>(after, ['id'])) || undefined
+                                    (after && parseCursor<CodeSmellLifespan>(after, [['id']])) || undefined
                                 return {
                                     repository: repository || undefined,
                                     analysis: analysis || undefined,

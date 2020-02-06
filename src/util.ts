@@ -72,10 +72,7 @@ export type CursorKey<T extends object> = readonly (keyof T)[]
  * @param after The after parameter provided
  * @param validKeys The keys or compound keys that are valid cursor targets
  */
-export function parseCursor<T extends object>(
-    after: string,
-    validKeys: (keyof T | CursorKey<T>)[]
-): Cursor<T> {
+export function parseCursor<T extends object>(after: string, validKeys: CursorKey<T>[]): Cursor<T> {
     const [keyStr, value] = base64decode(after).split(':', 2)
     const compoundKey = keyStr.split(',')
     if (value === undefined || !validKeys.some(validKey => isEqual(compoundKey, validKey))) {
