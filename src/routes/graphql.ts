@@ -504,7 +504,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 type: GraphQLNonNull(AnalysisType),
                 description: 'The analysis this code smell was detected in.',
             },
-        },
+            repository: {
+                type: GraphQLNonNull(RepositoryType),
+                description: 'The repository the code smell was detected in.',
+            },
     })
 
     var { connectionType: CodeSmellLifespanConnectionType } = connectionDefinitions({
@@ -1038,6 +1041,10 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         async analysis(args: {}, { loaders }: Context) {
             const analysis = await loaders.analysis.byId.load(this.lifespan.analysis)
             return new AnalysisResolver(analysis)
+        }
+
+        repository() {
+            return new RepositoryResolver(this.lifespan.repository)
         }
     }
 
