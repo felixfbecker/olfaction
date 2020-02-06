@@ -1,7 +1,7 @@
 import DataLoader from 'dataloader'
 import sql from 'sql-template-strings'
 import * as git from './git'
-import { last } from 'lodash'
+import { last as getLast } from 'lodash'
 import {
     CodeSmell,
     RepoSpec,
@@ -39,6 +39,7 @@ import {
 import objectHash from 'object-hash'
 import { trace, ParentSpanContext } from './tracing'
 import pMap from 'p-map'
+import { Iterable } from 'ix'
 
 export type ForwardConnectionArguments = Pick<ConnectionArguments, 'first' | 'after'>
 
@@ -104,7 +105,7 @@ export interface Loaders {
 
         /** Loads the existing commit OIDs in a repository */
         forRepository: DataLoader<
-            RepoSpec & ForwardConnectionArguments & git.GitLogFilters,
+            RepoSpec & ConnectionArguments & git.GitLogFilters,
             Connection<Commit>,
             string
         >
@@ -162,9 +163,9 @@ const connectionFromOverfetchedResult = <T extends object>(
         get pageInfo() {
             return {
                 startCursor: edges[0]?.cursor,
-                endCursor: last(edges)?.cursor,
+                endCursor: getLast(edges)?.cursor,
                 hasPreviousPage: !!after, // The presence of an "after" cursor MUST mean there is at least one item BEFORE this page
-                hasNextPage: last(result) !== last(edges)?.node,
+                hasNextPage: getLast(result) !== getLast(edges)?.node,
             }
         },
     }
@@ -258,7 +259,17 @@ export const createLoaders = ({
                 { batchScheduleFn, cacheKeyFn: ({ lifespan, ordinal }) => `${lifespan}#${ordinal}` }
             ),
 
-            many: new DataLoader(
+            many: new DataLoader<
+                Partial<RepoSpec> &
+                    Partial<CommitSpec> &
+                    Partial<AnalysisSpec> &
+                    Partial<FileSpec> &
+                    KindFilter &
+                    PathPatternFilter &
+                    ForwardConnectionArguments,
+                Connection<CodeSmell>,
+                string
+            >(
                 specs =>
                     trace(span, 'loaders.codeSmell.many', async span => {
                         const queries = IterableX.from(specs)
@@ -853,37 +864,85 @@ export const createLoaders = ({
                     trace(span, 'loaders.commit.forRepository', async span =>
                         pMap(
                             specs,
-                            async ({ repository, first, after, startRevision, path, ...filterOptions }) => {
+                            async ({
+                                repository,
+                                first,
+                                after,
+                                before,
+                                last,
+                                startRevision,
+                                path,
+                                ...filterOptions
+                            }): Promise<Connection<Commit> | Error> => {
                                 try {
                                     const afterOffset = (after && cursorToOffset(after)) || 0
+                                    const beforeOffset = (before && cursorToOffset(before)) || Infinity
                                     assert(
                                         !afterOffset || (!isNaN(afterOffset) && afterOffset >= 0),
-                                        'Invalid cursor'
+                                        'Invalid after cursor'
                                     )
-                                    const commits = await git
+                                    assert(
+                                        !beforeOffset || (!isNaN(beforeOffset) && beforeOffset >= 0),
+                                        'Invalid before cursor'
+                                    )
+                                    assert(
+                                        !((before || last) && (after || first)),
+                                        'Can only paginate forwards or backwards, not both'
+                                    )
+                                    const overfetchedEdges: Edge<Commit>[] = await git
                                         .log({
                                             ...filterOptions,
                                             repoRoot,
                                             repository,
                                             startRevision,
+                                            // Forward pagination:
                                             // Using offset-based pagination is okay because
                                             // the git history after a given start commit is immutable.
-                                            skip: afterOffset && afterOffset + 1,
+                                            skip: after ? afterOffset + 1 : 0,
                                             maxCount: typeof first === 'number' ? first + 1 : undefined,
                                         })
-                                        .tap((commit: Commit) =>
-                                            loaders.commit.byOid.prime(
-                                                { repository, commit: commit.oid },
-                                                commit
-                                            )
-                                        )
+                                        // Backwards pagination: include up to beforeOffset (exclusive)
+                                        .takeWhile((edge, index) => index < beforeOffset)
+                                        // Calculating cursors needs to be done before skipping items so index offsets are correct
+                                        .map((commit, index) => ({
+                                            node: commit,
+                                            get cursor() {
+                                                return offsetToCursor(afterOffset + index)
+                                            },
+                                        }))
+                                        // Backwards pagination: Include +1 to know whether there is a previous page
+                                        .takeLast(typeof last === 'number' ? last + 1 : Infinity)
                                         .toArray()
-
-                                    return connectionFromOverfetchedResult<Commit>(
-                                        commits,
-                                        { first, after },
-                                        (node, index) => offsetToCursor(afterOffset + index)
-                                    )
+                                    const edges: Edge<Commit>[] = Iterable.from(overfetchedEdges)
+                                        // Backwards pagination: Remove the extra edge at the start that was included in takeLast()
+                                        .takeLast(typeof last === 'number' ? last : Infinity)
+                                        // Forwards pagination: Remove the extra edge at the end that was included with maxCount
+                                        .take(typeof first === 'number' ? first : Infinity)
+                                        // Only prime items that are actually returned to save memory
+                                        .tap({
+                                            next: edge =>
+                                                loaders.commit.byOid.prime(
+                                                    { repository, commit: edge.node.oid },
+                                                    edge.node
+                                                ),
+                                        })
+                                        .toArray()
+                                    return {
+                                        edges,
+                                        get pageInfo() {
+                                            return {
+                                                endCursor: getLast(edges)?.cursor,
+                                                startCursor: edges[0]?.cursor,
+                                                // Forward pagination: The presence of an "after" cursor MUST mean there is at least one item BEFORE this page
+                                                // Backward pagination: Overfetched result includes one more
+                                                hasPreviousPage: !!after || overfetchedEdges[0] !== edges[0],
+                                                // Forward pagination: Overfetched result includes one more
+                                                // Backward pagination: The presence of an "before" cursor MUST mean there is at least one item AFTER this page
+                                                hasNextPage:
+                                                    !!before || getLast(overfetchedEdges) !== getLast(edges),
+                                            }
+                                        },
+                                    }
                                 } catch (err) {
                                     return asError(err)
                                 }
@@ -897,6 +956,8 @@ export const createLoaders = ({
                         repository,
                         first,
                         after,
+                        before,
+                        last,
                         startRevision,
                         messagePattern,
                         path,
@@ -907,6 +968,8 @@ export const createLoaders = ({
                             repository,
                             first,
                             after,
+                            before,
+                            last,
                             startRevision,
                             messagePattern,
                             path,
