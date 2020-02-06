@@ -504,9 +504,9 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 description: 'The instances of the code smell throughout commit history.',
             },
             duration: {
-                type: GraphQLNonNull(GraphQLString),
+                type: GraphQLString,
                 description:
-                    'The duration this code smell was present in the codebase as an ISO8601 duration string',
+                    'The duration this code smell was present in the codebase as an ISO8601 duration string. `null` if commit data is inconsistent.',
             },
             interval: {
                 type: GraphQLNonNull(GraphQLString),
