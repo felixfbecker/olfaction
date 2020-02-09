@@ -1273,14 +1273,14 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
         async codeSmells(
             args: GraphQLArgs<ForwardConnectionArguments & KindFilter & Partial<AnalysisSpec>>,
             { loaders }: Context
-        ) {
+        ): Promise<Connection<CodeSmellResolver>> {
             const codeSmells = await loaders.codeSmell.many.load({
                 ...this.spec,
                 ...args,
                 pathPattern: null,
                 analysis: args.analysis || undefined,
             })
-            return codeSmells
+            return mapConnectionNodes(codeSmells, node => new CodeSmellResolver(node))
         }
 
         async lineCounts(args: EncodingArgs, context: Context) {
