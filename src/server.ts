@@ -34,7 +34,7 @@ async function main(): Promise<void> {
 
     app.use(bodyParser.json({ limit: '2GB' }))
 
-    app.use(morgan('dev', { immediate: false }))
+    app.use(morgan('short', { immediate: false }))
 
     if (basicAuthUsers) {
         app.use(basicAuth({ users: basicAuthUsers, challenge: true, realm: 'olfaction' }))
