@@ -235,7 +235,7 @@ export const createLoaders = ({
                             with input as materialized (
                                 select
                                     ordinality,
-                                    nullif(spec->>'lifespan', '')::uuid as "analysis",
+                                    nullif(spec->>'lifespan', '')::uuid as "lifespan",
                                     nullif(spec->'ordinal', 'null')::int as "ordinal",
                                     nullif(spec->'first', 'null')::int as "first",
                                     nullif(spec->>'after', '')::uuid as "after"
