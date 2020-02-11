@@ -1,4 +1,4 @@
-@startuml database
+@startuml database_normalized
 hide circle
 hide empty members
 skinparam monochrome true
@@ -16,14 +16,22 @@ entity code_smell_lifespans {
 
 entity code_smells {
   *id INTEGER <<PK>>
-  *kind TEXT
   *lifespan UUID <<FK>>
   *ordinal INTEGER
-  *repository TEXT
   *commit TEXT
-  *locations JSONB
   message TEXT
 }
+
+entity code_smell_locations {
+  *code_smell INTEGER <<FK>>
+  *file TEXT
+  *start_line INTEGER
+  *start_character INTEGER
+  *end_line INTEGER
+  *end_character INTEGER
+}
+
+code_smells ||-|{ code_smell_locations
 
 code_smell_lifespans ||-|{ code_smells
 

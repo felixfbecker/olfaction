@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" contentScriptType="application/ecmascript" contentStyleType="text/css" height="259px" preserveAspectRatio="none" style="width:502px;height:259px;" version="1.1" viewBox="0 0 502 259" width="502px" zoomAndPan="magnify"><defs/><g><!--MD5=[5a4998846369c8141ef5e90f9d462b02]
+class code_smell_lifespans--><rect fill="#FFFFFF" height="83.9531" id="code_smell_lifespans" style="stroke: #383838; stroke-width: 1.5;" width="127" x="6" y="152"/><text fill="#000000" font-family="sans-serif" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="121" x="9" y="168.6016">code_smell_lifespans</text><line style="stroke: #383838; stroke-width: 1.5;" x1="7" x2="132" y1="176.1328" y2="176.1328"/><ellipse cx="17" cy="187.1328" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="68" x="26" y="190.7676">id UUID «PK»</text><ellipse cx="17" cy="200.0879" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="53" x="26" y="203.7227">kind TEXT</text><ellipse cx="17" cy="213.043" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="86" x="26" y="216.6777">repository TEXT</text><ellipse cx="17" cy="225.998" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="101" x="26" y="229.6328">analysis UUID «FK»</text><!--MD5=[3f8083139aa16b2699d4e0422d192327]
+class code_smells--><rect fill="#FFFFFF" height="96.9082" id="code_smells" style="stroke: #383838; stroke-width: 1.5;" width="126" x="168.5" y="145.5"/><text fill="#000000" font-family="sans-serif" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="70" x="196.5" y="162.1016">code_smells</text><line style="stroke: #383838; stroke-width: 1.5;" x1="169.5" x2="293.5" y1="169.6328" y2="169.6328"/><ellipse cx="179.5" cy="180.6328" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="86" x="188.5" y="184.2676">id INTEGER «PK»</text><ellipse cx="179.5" cy="193.5879" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="100" x="188.5" y="197.2227">lifespan UUID «FK»</text><ellipse cx="179.5" cy="206.543" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="86" x="188.5" y="210.1777">ordinal INTEGER</text><ellipse cx="179.5" cy="219.498" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="70" x="188.5" y="223.1328">commit TEXT</text><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="77" x="188.5" y="236.0879">message TEXT</text><!--MD5=[34755d43aea8f383fcc029f5fc8d0c8d]
+class code_smell_locations--><rect fill="#FFFFFF" height="109.8633" id="code_smell_locations" style="stroke: #383838; stroke-width: 1.5;" width="162" x="329.5" y="139"/><text fill="#000000" font-family="sans-serif" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="120" x="350.5" y="155.6016">code_smell_locations</text><line style="stroke: #383838; stroke-width: 1.5;" x1="330.5" x2="490.5" y1="163.1328" y2="163.1328"/><ellipse cx="340.5" cy="174.1328" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="136" x="349.5" y="177.7676">code_smell INTEGER «FK»</text><ellipse cx="340.5" cy="187.0879" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="46" x="349.5" y="190.7227">file TEXT</text><ellipse cx="340.5" cy="200.043" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="98" x="349.5" y="203.6777">start_line INTEGER</text><ellipse cx="340.5" cy="212.998" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="130" x="349.5" y="216.6328">start_character INTEGER</text><ellipse cx="340.5" cy="225.9531" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="93" x="349.5" y="229.5879">end_line INTEGER</text><ellipse cx="340.5" cy="238.9082" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="125" x="349.5" y="242.543">end_character INTEGER</text><!--MD5=[9075c4bca6aa9e3a319a94c342a0d4f7]
+class analyses--><rect fill="#FFFFFF" height="58.043" id="analyses" style="stroke: #383838; stroke-width: 1.5;" width="94" x="22.5" y="14.5"/><text fill="#000000" font-family="sans-serif" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="49" x="45" y="31.1016">analyses</text><line style="stroke: #383838; stroke-width: 1.5;" x1="23.5" x2="115.5" y1="38.6328" y2="38.6328"/><ellipse cx="33.5" cy="49.6328" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="68" x="42.5" y="53.2676">id UUID «PK»</text><ellipse cx="33.5" cy="62.5879" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="59" x="42.5" y="66.2227">name TEXT</text><!--MD5=[c520f953ff29bd64c19101dc4fd0409a]
+class analyzed_commits--><rect fill="#FFFFFF" height="70.998" id="analyzed_commits" style="stroke: #383838; stroke-width: 1.5;" width="112" x="151.5" y="8"/><text fill="#000000" font-family="sans-serif" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="106" x="154.5" y="24.6016">analyzed_commits</text><line style="stroke: #383838; stroke-width: 1.5;" x1="152.5" x2="262.5" y1="32.1328" y2="32.1328"/><ellipse cx="162.5" cy="43.1328" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="73" x="171.5" y="46.7676">analysis UUID</text><ellipse cx="162.5" cy="56.0879" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="86" x="171.5" y="59.7227">repository TEXT</text><ellipse cx="162.5" cy="69.043" fill="#000000" rx="3" ry="3" style="stroke: #000000; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="11" lengthAdjust="spacingAndGlyphs" textLength="70" x="171.5" y="72.6777">commit TEXT</text><!--MD5=[88dd114417ef411ade9768d9c6b2cefe]
+link code_smells to code_smell_locations--><path d="M302.83,194 C308.86,194 314.89,194 320.91,194 " fill="none" id="code_smells-code_smell_locations" style="stroke: #383838; stroke-width: 1.0;"/><line style="stroke: #383838; stroke-width: 1.0;" x1="321.13" x2="329.13" y1="194" y2="188"/><line style="stroke: #383838; stroke-width: 1.0;" x1="321.13" x2="329.13" y1="194" y2="200"/><line style="stroke: #383838; stroke-width: 1.0;" x1="321.13" x2="329.13" y1="194" y2="194"/><line style="stroke: #383838; stroke-width: 1.0;" x1="319.13" x2="319.13" y1="190" y2="198"/><line style="stroke: #383838; stroke-width: 1.0;" x1="298.78" x2="298.78" y1="198" y2="190"/><line style="stroke: #383838; stroke-width: 1.0;" x1="301.78" x2="301.78" y1="198" y2="190"/><line style="stroke: #383838; stroke-width: 1.0;" x1="302.78" x2="294.78" y1="194" y2="194"/><!--MD5=[e54315733339a38d37199204c3d61e16]
+link code_smell_lifespans to code_smells--><path d="M141.11,194 C147.52,194 153.93,194 160.34,194 " fill="none" id="code_smell_lifespans-code_smells" style="stroke: #383838; stroke-width: 1.0;"/><line style="stroke: #383838; stroke-width: 1.0;" x1="160.46" x2="168.46" y1="194" y2="188"/><line style="stroke: #383838; stroke-width: 1.0;" x1="160.46" x2="168.46" y1="194" y2="200"/><line style="stroke: #383838; stroke-width: 1.0;" x1="160.46" x2="168.46" y1="194" y2="194"/><line style="stroke: #383838; stroke-width: 1.0;" x1="158.46" x2="158.46" y1="190" y2="198"/><line style="stroke: #383838; stroke-width: 1.0;" x1="137.1" x2="137.1" y1="198" y2="190"/><line style="stroke: #383838; stroke-width: 1.0;" x1="140.1" x2="140.1" y1="198" y2="190"/><line style="stroke: #383838; stroke-width: 1.0;" x1="141.1" x2="133.1" y1="194" y2="194"/><!--MD5=[1879a323b4e0a4f4246db859f1437e52]
+link analyses to code_smell_lifespans--><path d="M69.5,81 C69.5,99.96 69.5,123.39 69.5,143.91 " fill="none" id="analyses-code_smell_lifespans" style="stroke: #383838; stroke-width: 1.0;"/><line style="stroke: #383838; stroke-width: 1.0;" x1="69.5" x2="75.5" y1="143.91" y2="151.91"/><line style="stroke: #383838; stroke-width: 1.0;" x1="69.5" x2="63.5" y1="143.91" y2="151.91"/><line style="stroke: #383838; stroke-width: 1.0;" x1="69.5" x2="69.5" y1="143.91" y2="151.91"/><ellipse cx="69.5" cy="137.91" fill="none" rx="4" ry="4" style="stroke: #383838; stroke-width: 1.0;"/><line style="stroke: #383838; stroke-width: 1.0;" x1="65.5" x2="73.5" y1="76.78" y2="76.78"/><line style="stroke: #383838; stroke-width: 1.0;" x1="65.5" x2="73.5" y1="79.78" y2="79.78"/><line style="stroke: #383838; stroke-width: 1.0;" x1="69.5" x2="69.5" y1="80.78" y2="72.78"/><!--MD5=[1615cba8b1a0d5ac4be3d80a4dbb87ec]
+link analyses to analyzed_commits--><path d="M124.82,43.5 C130.92,43.5 137.02,43.5 143.12,43.5 " fill="none" id="analyses-analyzed_commits" style="stroke: #383838; stroke-width: 1.0;"/><line style="stroke: #383838; stroke-width: 1.0;" x1="143.44" x2="151.44" y1="43.5" y2="37.5"/><line style="stroke: #383838; stroke-width: 1.0;" x1="143.44" x2="151.44" y1="43.5" y2="49.5"/><line style="stroke: #383838; stroke-width: 1.0;" x1="143.44" x2="151.44" y1="43.5" y2="43.5"/><ellipse cx="137.44" cy="43.5" fill="none" rx="4" ry="4" style="stroke: #383838; stroke-width: 1.0;"/><line style="stroke: #383838; stroke-width: 1.0;" x1="120.67" x2="120.67" y1="47.5" y2="39.5"/><line style="stroke: #383838; stroke-width: 1.0;" x1="123.67" x2="123.67" y1="47.5" y2="39.5"/><line style="stroke: #383838; stroke-width: 1.0;" x1="124.67" x2="116.67" y1="43.5" y2="43.5"/><!--MD5=[d0e0119f694477d9a7c700977e1f4ab3]
+@startuml database_normalized
+hide circle
+hide empty members
+skinparam monochrome true
+skinparam style strictuml
+skinparam shadowing false
+skinparam backgroundColor transparent
+skinparam classBackgroundColor transparent
+
+entity code_smell_lifespans {
+  *id UUID <<PK>>
+  *kind TEXT
+  *repository TEXT
+  *analysis UUID <<FK>>
+}
+
+entity code_smells {
+  *id INTEGER <<PK>>
+  *lifespan UUID <<FK>>
+  *ordinal INTEGER
+  *commit TEXT
+  message TEXT
+}
+
+entity code_smell_locations {
+  *code_smell INTEGER <<FK>>
+  *file TEXT
+  *start_line INTEGER
+  *start_character INTEGER
+  *end_line INTEGER
+  *end_character INTEGER
+}
+
+code_smells ||-|{ code_smell_locations
+
+code_smell_lifespans ||-|{ code_smells
+
+entity analyses {
+  *id UUID <<PK>>
+  *name TEXT
+}
+analyses ||- -o{ code_smell_lifespans
+
+entity analyzed_commits {
+  *analysis UUID
+  *repository TEXT
+  *commit TEXT
+}
+
+analyses ||-o{ analyzed_commits
+
+@enduml
+
+PlantUML version 1.2020.00(Sat Jan 11 13:30:53 CET 2020)
+(GPL source distribution)
+Java Runtime: Java(TM) SE Runtime Environment
+JVM: Java HotSpot(TM) 64-Bit Server VM
+Java Version: 13.0.1+9
+Operating System: Mac OS X
+Default Encoding: ISO8859-1
+Language: en
+Country: US
+--></g></svg>
