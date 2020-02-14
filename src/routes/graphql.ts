@@ -1223,7 +1223,8 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
             const connection = await loaders.codeSmell.many.load({
                 ...this.spec,
                 ...args,
-                analysis: args.analysis || undefined,
+                analysis:
+                    (args.analysis && (await loaders.analysis.byName.load(args.analysis)).id) || undefined,
             })
             return mapConnectionNodes(connection, node => new CodeSmellResolver(node))
         }
@@ -1278,7 +1279,8 @@ export function createGraphQLHandler({ dbPool, repoRoot }: DBContext & RepoRootS
                 ...this.spec,
                 ...args,
                 pathPattern: null,
-                analysis: args.analysis || undefined,
+                analysis:
+                    (args.analysis && (await loaders.analysis.byName.load(args.analysis)).id) || undefined,
             })
             return mapConnectionNodes(codeSmells, node => new CodeSmellResolver(node))
         }
