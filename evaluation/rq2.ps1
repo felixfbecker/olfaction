@@ -1,47 +1,73 @@
-#Requires -Version 7.0
+<#
+.SYNOPSIS
+    Answers RQ2: How scattered are code smells in each commit over time?
 
-# 2. How scattered are code smells in each commit over time?
+.OUTPUTS
+    Outputs the CommitEdges with files and code smell locations, as needed for the computation.
+
+    To store it in a newline-delimited JSON file, pipe the output to:
+
+        ForEach-Object node |
+        ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress } |
+        Out-File ./rq2_data.jsonnd
+
+.PARAMETER ServerUrl
+    Optional URL of the server. Defaults to http://localhost.
+
+.PARAMETER Analysis
+    Analysis to gather data from. Defaults to "seed".
+
+.PARAMETER Credential
+    Optional HTTP basic auth credentials to use.
+
+.PARAMETER Verbose
+    Enable logging.
+#>
 
 [cmdletbinding()]
 param(
-    [Uri] $ServerUrl = [Uri]::new("http://localhost:4040"),
-
-    [Parameter(Mandatory)]
-    $Analysis,
-
+    [Uri] $ServerUrl = [Uri]::new("http://localhost"),
+    [string] $Analysis = 'seed',
     [pscredential] $Credential
 )
 
 
-$body = (@{
-    query = '
-        query($analysis: String!) {
-            analysis(name: $analysis) {
-                analyzedRepositories {
-                    edges {
-                        node {
-                            commits {
-                                edges {
-                                    node {
-                                        oid
-                                        # Get all files to determine breadth of software
-                                        files {
-                                            edges {
-                                                node {
-                                                    path
-                                                }
+$query = '
+    query($analysis: String!, $afterRepo: String, $afterCommit: String, $commitsFirst: Int) {
+        analysis(name: $analysis) {
+            analyzedRepositories(first: 1, after: $afterRepo) {
+                pageInfo {
+                    hasNextPage
+                    endCursor
+                }
+                edges {
+                    node {
+                        name
+                        commits(after: $afterCommit, first: $commitsFirst) {
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
+                            edges {
+                                node {
+                                    oid
+                                    # Get all files to determine breadth of software
+                                    files {
+                                        edges {
+                                            node {
+                                                path
                                             }
                                         }
-                                        codeSmells {
-                                            edges {
-                                                node {
-                                                    lifespan {
-                                                        kind
-                                                    }
-                                                    locations {
-                                                        file {
-                                                            path
-                                                        }
+                                    }
+                                    codeSmells {
+                                        edges {
+                                            node {
+                                                lifespan {
+                                                    kind
+                                                }
+                                                locations {
+                                                    file {
+                                                        path
                                                     }
                                                 }
                                             }
@@ -54,56 +80,69 @@ $body = (@{
                 }
             }
         }
-    '
-    variables = @{
-        analysis = $Analysis
     }
-} | ConvertTo-Json)
+'
 
-$measure = Measure-Command {
-    $result = Invoke-RestMethod -Method POST -Uri ([Uri]::new($ServerUrl, "/graphql")) -Body $body -ContentType 'application/json' -Credential $Credential -AllowUnencryptedAuthentication
-}
-Write-Verbose "Got result after $measure"
-if ($result.PSObject.Properties['errors'] -and $result.errors) {
-    throw ($result.errors | ConvertTo-Json -Depth 100)
-}
-$result.data.analysis.analyzedRepositories.edges |
-    ForEach-Object { $_.node.commits.edges } |
-    ForEach-Object -Parallel {
-        Import-Module $using:PSScriptRoot/directory_distance.psm1
+$script:requests = 0
+&{
+    # Paginate commits and repositories
+    $body = [pscustomobject]@{
+        query = $query
+        variables = [pscustomobject]@{
+            analysis = $Analysis
+            afterRepo = $null
+            afterCommit = $null
+            commitsFirst = 10
+        }
+    }
+    while ($true) {
+        Write-Verbose "RQ2 Request $($script:requests)"
+        $result = Invoke-RestMethod `
+            -Method POST `
+            -Uri ([Uri]::new($ServerUrl, "/graphql")) `
+            -Body (ConvertTo-Json -InputObject $body -Compress) `
+            -ContentType 'application/json' `
+            -Credential $Credential `
+            -AllowUnencryptedAuthentication
+        Write-Verbose "Got result"
 
-        $commit = $_.node
-        Write-Verbose "Commit $($commit.oid)"
-        Write-Verbose "$($commit.files.edges.Count) files"
-        # Calculate breadth of software at this commit
-        $breadth = (Measure-PairwiseDirectoryDistances -Paths ($commit.files.edges | ForEach-Object { $_.node.path }) | Measure-Object -Maximum).Maximum
-        Write-Verbose "Maximum breadth is $breadth"
-        Write-Verbose "Going through $($commit.codeSmells.edges.Count) code smells"
-        $commit.codeSmells.edges |
-            ForEach-Object { $_.node } |
-            # Group all code smells by kind within one commit
-            Group-Object -Property { $_.lifespan.kind } |
-            ForEach-Object {
-                $kind = $_.Name
-                $filePaths = $_.Group |
-                    ForEach-Object { $_.locations } |
-                    ForEach-Object { $_.file.path }
-                Measure-PairwiseDirectoryDistances -Paths $filePaths |
-                    ForEach-Object {
-                        [pscustomobject]@{
-                            Kind = $kind
-                            # Relate distances to maximum breadth
-                            Scatter = $_ / $breadth
-                        }
-                    }
+        $script:requests++
+
+        if ($result.PSObject.Properties['errors'] -and $result.errors) {
+            throw ($result.errors | ConvertTo-Json -Depth 100)
+        }
+
+        $repoConnection = $result.data.analysis.analyzedRepositories
+        Write-Verbose "RQ2 repo $($repoConnection.edges[0].node.name)"
+        $commitConnection = $repoConnection.edges[0].node.commits
+
+        # Adjust pagination of commits based on how many files and code smells are in the repo
+        $lastCommit = $commitConnection.edges[$commitConnection.edges.Count - 1].node
+        Write-Verbose "$($lastCommit.files.edges.Count) files"
+        Write-Verbose "$($lastCommit.codeSmells.edges.Count) code smells"
+        $countSum = $lastCommit.files.edges.Count + $lastCommit.codeSmells.edges.Count
+        $body.variables.commitsFirst = if ($countSum -ne 0) { [int][math]::max(1, [math]::min(100, 150000 / $countSum)) } else { 10 }
+        Write-Verbose "Adjusting page size to $($body.variables.commitsFirst) commits"
+
+        # Process commits
+        $commitConnection.edges
+
+        if ($commitConnection.pageInfo.hasNextPage) {
+            $body.variables.afterCommit = $commitConnection.pageInfo.endCursor
+            if (-not $commitConnection.pageInfo.endCursor) {
+                throw "Invalid cursor"
             }
+            Write-Verbose "Next commit page after $($body.variables.afterCommit)"
+            continue
+        }
+        if ($repoConnection.pageInfo.hasNextPage) {
+            $body.variables.afterRepo = $repoConnection.pageInfo.endCursor
+            $body.variables.afterCommit = $null
+            Write-Verbose "Next repository page after $($body.variables.afterRepo)"
+            continue
+        }
+        Write-Verbose "No next page"
+        break
     }
-    # Group-Object -Property Kind |
-    # ForEach-Object {
-    #     $_.Group |
-    #         Measure-Object -AllStats -Poperty Scatter |
-    #         ForEach-Object {
-    #             Add-Member -MemberType NoteProperty -Name Kind -Value $_.Name -InputObject $_
-    #             $_
-    #         }
-    # }
+}
+Write-Verbose "$script:requests requests made"
