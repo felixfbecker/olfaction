@@ -55,6 +55,7 @@ docker run --init --rm --name olfaction -p 4040:4040 --env PGHOST=host.docker.in
 ```
 
 The way to run the Docker image varies by platform. Please refer to the Docker documentation for more information.
+The command above will store repositories inside the container. It is possible to mount a Docker volume instead and set `REPO_ROOT` to put repositories on that volume.
 
 ## Set up database
 

@@ -16,6 +16,7 @@ import { Tracer } from 'opentracing'
 import opentracingMiddleware from 'express-opentracing'
 import bodyParser from 'body-parser'
 import mkdirp from 'mkdirp'
+import execa from 'execa'
 
 const repoRoot = path.resolve(process.env.REPO_ROOT || path.resolve(process.cwd(), 'repos'))
 const port = (process.env.PORT && parseInt(process.env.PORT, 10)) || 4040
@@ -24,6 +25,7 @@ const basicAuthUsers = process.env.BASIC_AUTH_USERS && JSON.parse(process.env.BA
 
 async function main(): Promise<void> {
     await mkdirp(repoRoot)
+    console.log((await execa('git', ['--version'])).stdout)
 
     const dbPool = new Pool()
     const tracer: Tracer = initTracerFromEnv({ serviceName: 'olfaction-api' }, {})
