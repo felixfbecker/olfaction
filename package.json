@@ -65,7 +65,7 @@
     "opentracing": "^0.14.4",
     "original-url": "^1.2.3",
     "p-map": "^3.0.0",
-    "pg": "^7.12.1",
+    "pg": "^7.18.1",
     "rmfr": "^2.0.0",
     "sloc": "^0.2.1",
     "source-map-support": "^0.5.16",
