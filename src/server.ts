@@ -15,12 +15,16 @@ import { initTracerFromEnv } from 'jaeger-client'
 import { Tracer } from 'opentracing'
 import opentracingMiddleware from 'express-opentracing'
 import bodyParser from 'body-parser'
+import mkdirp from 'mkdirp'
 
 const repoRoot = path.resolve(process.env.REPO_ROOT || path.resolve(process.cwd(), 'repos'))
 const port = (process.env.PORT && parseInt(process.env.PORT, 10)) || 4040
+const host = process.env.HOST || 'localhost'
 const basicAuthUsers = process.env.BASIC_AUTH_USERS && JSON.parse(process.env.BASIC_AUTH_USERS)
 
 async function main(): Promise<void> {
+    await mkdirp(repoRoot)
+
     const dbPool = new Pool()
     const tracer: Tracer = initTracerFromEnv({ serviceName: 'olfaction-api' }, {})
 
@@ -55,10 +59,11 @@ async function main(): Promise<void> {
     const server = await new Promise<Server>((resolve, reject) => {
         let server: Server
         // eslint-disable-next-line prefer-const
-        server = app.listen(port, err => (err ? reject(err) : resolve(server)))
+        server = app.listen(port, host, err => (err ? reject(err) : resolve(server)))
     })
 
-    console.log(`Listening on port ${(server.address() as AddressInfo).port}`)
+    const address = server.address() as AddressInfo
+    console.log(`Listening on ${address.address} port ${address.port}`)
 }
 
 main().catch(err => {
