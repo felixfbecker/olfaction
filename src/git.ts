@@ -35,6 +35,7 @@ export async function filterValidCommits({
     repository: string
     commitOids: Iterable<GitObjectID>
 }): Promise<GitObjectID[]> {
+    repository = validateRepositoryName({ repository })
     try {
         const { stdout } = await exec('git', ['rev-list', '--ignore-missing', '--no-walk', '--stdin', '--'], {
             cwd: resolveRepoDir({ repoRoot, repository }),
@@ -62,6 +63,17 @@ export function validateObjectID(value: unknown): GitObjectID {
     return value
 }
 
+export function validateRelativeRepoPath(value: string): string {
+    value = path.posix.normalize(value)
+    if (path.posix.isAbsolute(value)) {
+        throw new Error('Path is absolute')
+    }
+    if (/(^|\/)\.\.(\/|$)/.test(value)) {
+        throw new Error('Path contains relative references')
+    }
+    return value
+}
+
 export async function checkCommitExists({
     repository,
     commit,
@@ -84,6 +96,8 @@ export async function getFileContent({
     commit,
     file,
 }: RepoRootSpec & RepoSpec & FileSpec & CommitSpec): Promise<Buffer> {
+    repository = validateRepositoryName({ repository })
+    commit = validateObjectID(commit)
     const { stdout } = await exec('git', ['show', `${commit}:${file}`], {
         encoding: null,
         cwd: resolveRepoDir({ repoRoot, repository }),
@@ -156,6 +170,7 @@ export async function getCommits({
     repository: string
     commitOids: Iterable<GitObjectID>
 }): Promise<ReadonlyMap<GitObjectID, Commit>> {
+    repository = validateRepositoryName({ repository })
     // Bulk-validate the commits first, because git show fails hard on bad revisions
     const filteredCommitOids = await filterValidCommits({ repoRoot, repository, commitOids })
     try {
@@ -315,7 +330,12 @@ export async function listFiles({
     repoRoot: string
     directory?: string | null
 }): Promise<File[]> {
+    commit = validateObjectID(commit)
+    repository = validateRepositoryName({ repository })
     try {
+        if (directory) {
+            directory = validateRelativeRepoPath(directory)
+        }
         const { stdout } = await exec(
             'git',
             ['ls-tree', '-r', '--name-only', '--full-name', commit, ...(directory ? [directory] : [])],
@@ -350,6 +370,7 @@ export async function checkRepositoryExists({
     repository: string
     repoRoot: string
 }) {
+    repository = validateRepositoryName({ repository })
     try {
         await fs.stat(resolveRepoDir({ repoRoot, repository }))
     } catch (err) {
@@ -401,6 +422,7 @@ export const log = ({
     if (startRevision.includes('..')) {
         throw new Error(`Start revision cannot be a revision range: ${startRevision}`)
     }
+    repository = validateRepositoryName({ repository })
     const cwd = resolveRepoDir({ repoRoot, repository })
     const gitProcess = exec(
         'git',
@@ -449,6 +471,7 @@ export async function init({
     repoRoot: string
     repository: string
 }): Promise<void> {
+    repository = validateRepositoryName({ repository })
     const repo = resolveRepoDir({ repoRoot, repository })
     await fs.mkdir(repo)
     await exec('git', ['init', '--bare'], { cwd: repo })
@@ -465,51 +488,24 @@ export function unbundle({
     repository: string
     bundlePath: string
 }): exec.ExecaChildProcess {
+    repository = validateRepositoryName({ repository })
     const cwd = resolveRepoDir({ repoRoot, repository })
     // Fetch all branches and tags from the bundle
     // No "+", must be a fast forward
     return exec('git', ['fetch', '--tags', bundlePath, 'refs/heads/*:refs/heads/*'], { cwd })
 }
 
-export async function sortTopologically(
-    codeSmells: CodeSmell[],
-    repository: string,
-    repoRoot: string
-): Promise<CodeSmell[]> {
-    // Sort code smells by commit order
-    const commitIds = new Set(codeSmells.map(codeSmell => codeSmell.commit))
-    const sortedCommitIds = fromNodeStream(
-        exec('git', ['rev-list', '--topo-order', ...commitIds], { cwd: path.join(repository, repoRoot) })
-            .stdout!
-    ).pipe(
-        split('\n'),
-        filter(commitId => commitIds.has(commitId)),
-        take(commitIds.size)
-    )
-    const commitIndexes = new Map<string, number>()
-    let index = 0
-    for await (const commitId of sortedCommitIds) {
-        commitIndexes.set(commitId, index)
-        index++
-    }
-    return sortBy(codeSmells, codeSmell => commitIndexes.get(codeSmell.commit))
-}
-
 /**
- * Turns a sequence of text chunks into a sequence of lines
- * (where lines are separated by newlines)
- *
- * @returns an async iterable
+ * Turns a sequence of text chunks into a sequence of lines (where lines are separated by newlines).
  */
 const split = (seperator: string) =>
-    async function*(chunksAsync: AsyncIterable<string | Buffer>): AsyncIterable<string> {
+    async function*(chunks: AsyncIterable<string | Buffer>): AsyncIterable<string> {
         let previous = ''
-        for await (const chunk of chunksAsync) {
+        for await (const chunk of chunks) {
             previous += chunk.toString()
-            let eolIndex
+            let eolIndex: number
             while ((eolIndex = previous.indexOf(seperator)) >= 0) {
-                const line = previous.slice(0, eolIndex)
-                yield line
+                yield previous.slice(0, eolIndex)
                 previous = previous.slice(eolIndex + 1)
             }
         }
