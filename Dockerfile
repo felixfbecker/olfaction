@@ -1,11 +1,13 @@
 FROM node:13.6.0
 
-COPY . /srv/olfaction
+COPY ./package*.json /srv/olfaction/
 WORKDIR /srv/olfaction
-RUN npm ci
+RUN npm ci && npm cache clear -f
+
+COPY ./ /srv/olfaction/
 RUN npm run build
 
-ENV PORT=80
+ENV HOST=0.0.0.0
+EXPOSE 4040
 
-EXPOSE 80
-ENTRYPOINT [ "node", "out/server.js" ]
+CMD [ "node", "out/server.js" ]
