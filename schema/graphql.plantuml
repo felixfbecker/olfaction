@@ -27,6 +27,7 @@ class Analysis {
   +name: String!
   {method} +analyzedRepositories: Connection<Repository>!
   {method} +analyzedCommits: Connection<Commit>!
+  {method} +codeSmellLifespans: Connection<CodeSmellLifespan>!
 }
 
 class Repository {
@@ -53,7 +54,7 @@ Commit --> Signature : committed by >
 Commit --> Signature : authored by >
 Commit "1" *-- "0..*" CodeSmell : exists in <
 Commit "1" *-- "0..*" File : exists in <
-Commit "1" *-- "0..*" CombinedFileDifference
+Commit "1" *-- "0..*" CombinedFileDifference : applied >
 Commit "0..*" --o "0..*" Analysis : analyzed <
 
 class CombinedFileDifference {
@@ -121,7 +122,7 @@ class CodeSmellLifespan {
   {method} +analysis: Analysis!
   {method} +instances: Connection<CodeSmell>!
 }
-CodeSmellLifespan "1" *-- "1..*" CodeSmell
+CodeSmellLifespan "1" *-- "1..*" CodeSmell : part of <
 CodeSmellLifespan "0..*" --* "1" Analysis : detected <
 
 class LineCounts {
