@@ -50,7 +50,7 @@
     "compression": "^1.7.4",
     "dataloader": "^2.0.0",
     "execa": "^4.0.0",
-    "express": "^4.17.1",
+    "express": "^4.17.3",
     "express-basic-auth": "^1.2.0",
     "express-graphql": "^0.9.0",
     "express-opentracing": "^0.1.1",
